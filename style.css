@@ -1,0 +1,399 @@
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+:root {
+    --ink:    #1B2A45;
+    --ink-soft: #3C4A66;
+    --paper:  #FAF8F3;
+    --panel:  #F1EEE6;
+    --rule:   #D9D2C0;
+    --teal:   #2E6E62;
+    --clay:   #AE4A3B;
+    --amber:  #A97A34;
+    --slate:  #6B7280;
+    --font-display: 'Source Serif 4', Georgia, serif;
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+}
+
+/* ---------- Nền tổng thể ---------- */
+.gradio-container {
+    max-width: 100% !important;
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+    background: var(--paper) !important;
+    font-family: var(--font-body) !important;
+    color: var(--ink) !important;
+}
+
+.gradio-container h1, .gradio-container h2, .gradio-container h3 {
+    font-family: var(--font-display) !important;
+    font-weight: 600 !important;
+    color: var(--ink) !important;
+    letter-spacing: 0.01em;
+}
+
+.gradio-container h3 {
+    font-size: 15px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em !important;
+    color: var(--ink-soft) !important;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 8px;
+    margin-bottom: 14px !important;
+}
+
+/* ---------- Tabs kiểu "thẻ hồ sơ" ---------- */
+.tabs > .tab-nav {
+    border-bottom: 1px solid var(--rule) !important;
+    background: transparent !important;
+    gap: 4px;
+}
+
+.tabs > .tab-nav button {
+    font-family: var(--font-body) !important;
+    font-weight: 500 !important;
+    font-size: 13px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--slate) !important;
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 2px solid transparent !important;
+    padding: 10px 18px !important;
+}
+
+.tabs > .tab-nav button.selected {
+    color: var(--ink) !important;
+    border-bottom: 2px solid var(--ink) !important;
+}
+
+/* ---------- Khối / Panel ---------- */
+.gradio-container .panel, .gradio-container .form, .gradio-container .block {
+    border-radius: 6px !important;
+}
+
+.gradio-container [variant="panel"] {
+    background: var(--panel) !important;
+    border: 1px solid var(--rule) !important;
+    border-radius: 6px !important;
+    box-shadow: none !important;
+}
+
+/* ---------- Chatbot (Speaking Coach) ---------- */
+#chat-bot {
+    border: 1px solid var(--rule) !important;
+    border-radius: 6px !important;
+    background: #FFFFFF !important;
+}
+
+#chat-bot .message {
+    font-family: var(--font-body) !important;
+    font-size: 14.5px !important;
+    line-height: 1.55;
+}
+
+#chat-bot .message.user {
+    background: var(--panel) !important;
+    border: 1px solid var(--rule) !important;
+    color: var(--ink) !important;
+}
+
+#chat-bot .message.bot {
+    background: #FFFFFF !important;
+    border: 1px solid var(--rule) !important;
+    color: var(--ink) !important;
+}
+
+/* ---------- Nút ghi âm ---------- */
+#hide-dropdown-audio select,
+#hide-dropdown-audio .device-select,
+#hide-dropdown-audio [data-testid="music-icon"] + div {
+    display: none !important;
+}
+
+#hide-dropdown-audio button.clear-button,
+#hide-dropdown-audio .clear-button,
+#hide-dropdown-audio button[aria-label="Clear"] {
+    display: none !important;
+}
+
+#hide-dropdown-audio button:not(.clear-button) {
+    max-width: 220px !important;
+    margin: 12px auto !important;
+    border-radius: 24px !important;
+    justify-content: center !important;
+    background: var(--ink) !important;
+    color: var(--paper) !important;
+    font-family: var(--font-body) !important;
+    font-weight: 500 !important;
+    font-size: 13px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border: none !important;
+    padding: 10px 20px !important;
+}
+
+/* ---------- Nút Submit chính ---------- */
+.gradio-container button.primary {
+    background: var(--ink) !important;
+    color: var(--paper) !important;
+    border: none !important;
+    border-radius: 4px !important;
+    font-family: var(--font-body) !important;
+    font-weight: 500 !important;
+    font-size: 13px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.gradio-container button.primary:hover {
+    background: var(--ink-soft) !important;
+}
+
+/* ---------- Ô nhập liệu ---------- */
+.gradio-container textarea, .gradio-container input[type="text"] {
+    font-family: var(--font-body) !important;
+    border: 1px solid var(--rule) !important;
+    border-radius: 4px !important;
+    background: #FFFFFF !important;
+}
+
+.gradio-container textarea:focus, .gradio-container input[type="text"]:focus {
+    border-color: var(--ink) !important;
+    box-shadow: 0 0 0 1px var(--ink) !important;
+}
+
+/* ---------- Con dấu điểm (Band Seal) — signature element ---------- */
+.band-seal {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 8px 0;
+}
+
+.band-ring {
+    --pct: 0;
+    width: 116px;
+    height: 116px;
+    border-radius: 50%;
+    background: conic-gradient(var(--ink) calc(var(--pct) * 1%), var(--rule) 0);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+}
+
+.band-ring-inner {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.band-number {
+    font-family: var(--font-mono) !important;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.band-caption {
+    margin-top: 10px;
+    font-family: var(--font-body);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--slate);
+}
+
+/* ---------- Thẻ điểm tiêu chí (Cohesion, Syntax, ...) ---------- */
+.gradio-container .label-wrap {
+    background: #FFFFFF !important;
+    border: 1px solid var(--rule) !important;
+    border-radius: 4px !important;
+    padding: 6px 4px !important;
+}
+
+.gradio-container .label-wrap .label {
+    font-family: var(--font-body) !important;
+    font-size: 10.5px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--slate) !important;
+}
+
+.gradio-container .label-wrap output {
+    font-family: var(--font-mono) !important;
+    font-size: 17px !important;
+    font-weight: 600 !important;
+    color: var(--ink) !important;
+}
+
+/* ---------- Thẻ phản hồi bài viết ---------- */
+.feedback-card {
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: #FFFFFF;
+    padding: 16px 18px;
+    min-height: 150px;
+}
+
+.feedback-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel);
+    border-style: dashed;
+}
+
+.feedback-empty-text {
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--slate);
+    margin: 0;
+}
+
+.feedback-item {
+    border-bottom: 1px solid var(--rule);
+    padding: 10px 0;
+}
+
+.feedback-item:last-child {
+    border-bottom: none;
+}
+
+.feedback-tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-right: 8px;
+}
+
+/* Định hình cấu trúc khung nhận xét AI */
+.feedback-container {
+    max-height: 380px !important; /* Điều chỉnh lại để tổng độ cao cột phải vừa khít cột trái */
+    overflow-y: auto !important;
+    padding-right: 8px;
+}
+
+/* Tùy chỉnh thanh cuộn (scrollbar) cho mượt mà, nhỏ gọn */
+.feedback-container::-webkit-scrollbar {
+    width: 6px;
+}
+.feedback-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+.feedback-container::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.feedback-container::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+
+.feedback-tag.error { background: rgba(174, 74, 59, 0.12); color: var(--clay); }
+.feedback-tag.warn  { background: rgba(169, 122, 52, 0.14); color: var(--amber); }
+.feedback-tag.good  { background: rgba(46, 110, 98, 0.12); color: var(--teal); }
+
+.stat-card {
+    background-color: #f8f9fa;
+    padding: 15px 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.stat-title {
+    color: #6c757d;
+    font-size: 14px;
+    margin-bottom: 5px;
+}
+.stat-value {
+    color: #000000;
+    font-size: 28px;
+    font-weight: bold;
+}
+.flashcard-container {
+    background-color: #ffffff;
+    border: 1px solid #e9ecef;
+    border-radius: 20px;
+    padding: 0px 0px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    margin-top: 0px;
+}
+.word-index {
+    color: #adb5bd;
+    font-size: 16px;
+    margin-bottom: 15px;
+}
+.word-main {
+    font-family: 'Georgia', serif;
+    font-size: 48px;
+    color: #000000;
+    margin-bottom: 30px;
+}
+.custom-progress-bar {
+    width: 100%;
+    background-color: #e9ecef;
+    border-radius: 10px;
+    height: 10px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+.custom-progress-fill {
+    height: 100%;
+    background-color: #2f73d8;
+    border-radius: 10px;
+}
+
+.custom-btn-show {
+    background-color: #2f73d8 !important;
+    border-radius: 12px !important;
+    padding: 12px 30px !important;
+    font-size: 16px !important;
+}
+
+/* Cấu hình chung cho các nút bấm FSRS */
+.btn-fsrs {
+    color: white !important;
+    font-weight: bold !important;
+    transition: background-color 0.2s ease !important;
+}
+
+.btn-again {
+    background-color: #ef4444 !important;
+}
+.btn-again:hover {
+    background-color: #dc2626 !important;
+}
+
+.btn-hard {
+    background-color: #f97316 !important;
+}
+.btn-hard:hover {
+    background-color: #ea580c !important;
+}
+
+.btn-good {
+    background-color: #0ea5e9 !important;
+}
+.btn-good:hover {
+    background-color: #0284c7 !important;
+}
+
+.btn-easy {
+    background-color: #10b981 !important;
+}
+.btn-easy:hover {
+    background-color: #059669 !important;
+}

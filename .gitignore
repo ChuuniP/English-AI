@@ -1,0 +1,14 @@
+# Cache and temporary files
+huggingface_cache/
+models/
+temp/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+.venv
+venv/
+env/
+.DS_Store
+*.log
