@@ -363,11 +363,31 @@
     font-size: 16px !important;
 }
 
+/* ---------- Canh giữa Flashcard ---------- */
+#flashcard-wrap {
+    max-width: 560px !important;
+    margin: 0 auto !important;
+    float: none !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
 /* Cấu hình chung cho các nút bấm FSRS */
+.fsrs-buttons-row {
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+}
+
 .btn-fsrs {
     color: white !important;
     font-weight: bold !important;
     transition: background-color 0.2s ease !important;
+    min-width: 110px !important;   /* thay vì 250px cố định trong Python */
+    flex: 1 1 110px !important;
+    max-width: 160px !important;
 }
 
 .btn-again {
@@ -396,4 +416,60 @@
 }
 .btn-easy:hover {
     background-color: #059669 !important;
+}
+
+/* ---------- Bố cục tab Writing ---------- */
+#writing-tab-row {
+    gap: 20px;
+    align-items: stretch !important;
+}
+
+#writing-summary-panel {
+    background: var(--panel) !important;
+    border: 1px solid var(--rule) !important;
+    border-radius: 3px !important;
+    padding: 8px !important;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#writing-summary-panel h3 {
+    font-size: 15px !important;
+    margin: 0 0 10px 0 !important;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+}
+
+#score-summary-container {
+    gap: 10px;
+    align-items: center !important;
+}
+
+#score-summary-container .label-wrap {
+    text-align: center !important;
+}
+
+/* ---------- Canh giữa Video Player ---------- */
+#video-wrap {
+    max-width: 720px !important;   /* chỉnh theo ý bạn, vd 600px, 800px */
+    margin: 0 auto !important;
+    float: none !important;
+}
+
+#vocab-stats-row {
+    flex-wrap: nowrap !important;
+    gap: 12px !important;
+}
+
+#vocab-stats-row > * {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;   /* cho phép co lại thay vì xuống dòng */
+}
+
+/* Thu nhỏ nội dung bên trong thẻ khi màn hình hẹp, thay vì để nó tràn/xuống dòng */
+@media (max-width: 640px) {
+    #vocab-stats-row .stat-title { font-size: 12px !important; }
+    #vocab-stats-row .stat-value { font-size: 20px !important; }
+    #vocab-stats-row .stat-card { padding: 10px 12px !important; }
 }

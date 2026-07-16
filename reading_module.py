@@ -8,6 +8,14 @@ from fsrs import Card
 
 from vocabulary_module import pipeline_load
 
+try:
+    import eng_to_ipa as ipa
+    _IPA_AVAILABLE = True
+except ImportError:
+    ipa = None
+    _IPA_AVAILABLE = False
+    print("⚠️ Chưa cài đặt thư viện 'eng_to_ipa'. Chạy: pip install eng_to_ipa để bật tính năng phiên âm IPA.")
+
 
 def render_html_reading_zone(text_content, font_family, font_size, bg_color, text_color):
     # Ánh xạ từ nhãn Tiếng Việt sang CSS thật
@@ -120,6 +128,28 @@ def handle_file_upload(file_obj, font_family, font_size, bg_color, text_color):
         return "", gr.update(value=error_html)
 
 
+def get_phonetic_ipa(word):
+    """Trả về phiên âm IPA của một từ tiếng Anh, dùng thư viện eng_to_ipa (offline).
+    Trả về chuỗi rỗng nếu không tra được hoặc thư viện chưa được cài đặt."""
+    if not word or not str(word).strip():
+        return ""
+
+    clean_word = str(word).strip().strip(".,!?\"'()[]{}*:;").lower()
+    if not clean_word:
+        return ""
+
+    if not _IPA_AVAILABLE:
+        return ""
+
+    try:
+        result = ipa.convert(clean_word)
+        # eng_to_ipa bọc từ không tra được trong dấu * (vd: "*unknownword*")
+        if not result or result.strip("*") == clean_word:
+            return ""
+        return result.strip()
+    except Exception:
+        return ""
+
 def get_base_word(lemmatizer, word):
     clean_word = word.strip().strip(".,!?\"'()[]{}*:;").lower()
     if not clean_word:
@@ -134,9 +164,9 @@ def get_base_word(lemmatizer, word):
 
 
 def translate_and_get_cefr_with_excel(CEFR_DICT, translator, lemmatizer, words, max_retries=3, delay=0.5):
-    # Sử dụng chân thực cấu trúc đầu ra: Luôn trả về 2 giá trị
+    # Luôn trả về 3 giá trị: nghĩa, cấp độ CEFR, phiên âm IPA
     if not words or not str(words).strip():
-        return "", "N/A"
+        return "", "N/A", ""
 
     word_str = str(words).strip()
     meaning = word_str
@@ -163,10 +193,12 @@ def translate_and_get_cefr_with_excel(CEFR_DICT, translator, lemmatizer, words, 
             clean_word = word_to_check.strip().strip(".,!?\"'()[]{}*:;").lower()
             cefr_level = CEFR_DICT.get(clean_word, "N/A")
 
-    return meaning.strip(), cefr_level.strip()
+    phonetic_ipa = get_phonetic_ipa(base_word if base_word else word_to_check)
+
+    return meaning.strip(), cefr_level.strip(), phonetic_ipa
 
 
-def add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, word, cefr_j, meaning):
+def add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, word, cefr_j, meaning, phonetic=""):
     error_vocab_updates = (*[gr.update()] * 8, gr.update(), gr.update(), gr.update(), gr.update())
 
     if not word or not str(word).strip():
@@ -187,6 +219,11 @@ def add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, word, cefr_j, meaning):
 
     if not clean_cefr or clean_cefr == "":
         clean_cefr = "N/A"
+
+    clean_phonetic = str(phonetic).strip() if phonetic else ""
+    if not clean_phonetic:
+        # Nếu giao diện chưa gửi phiên âm, thử tra lại theo từ gốc
+        clean_phonetic = get_phonetic_ipa(clean_word)
 
     lookup_key = clean_word.lower()
     if not CEFR_DICT or lookup_key not in CEFR_DICT:
@@ -212,13 +249,14 @@ def add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, word, cefr_j, meaning):
 
         cursor.execute("""
             INSERT INTO user_vocabulary (
-                word, cefr_j, meaning, state, stability, difficulty, 
+                word, cefr_j, meaning, phonetic, state, stability, difficulty, 
                 elapsed_days, scheduled_days, last_review, due, added_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             clean_word,
             clean_cefr,
             clean_meaning,
+            clean_phonetic,
             card.state.value,
             card.stability,
             card.difficulty,

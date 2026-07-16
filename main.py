@@ -10,7 +10,7 @@ from google import genai
 
 import speaking_module as sm
 from agent import SimpleChatSessionManager
-import essay_scoring_module as esm
+import writting_module as wm
 import reading_module as rm
 from deep_translator import GoogleTranslator
 import vocabulary_module as vm
@@ -18,6 +18,7 @@ from fsrs import Scheduler
 import pandas as pd
 import nltk
 from nltk.stem import WordNetLemmatizer
+import listening_module as lm
 
 # ===========================================================================
 TEMP_DIR = os.getenv("APP_TEMP_DIR", os.path.join(os.getcwd(), "temp"))
@@ -108,7 +109,7 @@ ESSAY_SCORE_MIN, ESSAY_SCORE_MAX = 1.0, 5.0
 ESSAY_MAX_LEN = 512
 ESSAY_MODEL_WEIGHTS_PATH = r"E:\Đồ án môn học\Demo Speaking Module\models\best_model.bin"
 # ===========================================================================
-essay_scoring_tokenizer, essay_scoring_model = esm.load_model(ESSAY_MODEL_WEIGHTS_PATH, device, ESSAY_MODEL_NAME, ESSAY_SCORING_COLUMNS)
+essay_scoring_tokenizer, essay_scoring_model = wm.load_model(ESSAY_MODEL_WEIGHTS_PATH, device, ESSAY_MODEL_NAME, ESSAY_SCORING_COLUMNS)
 # ===========================================================================
 # ---READING---
 translator = GoogleTranslator(source="en", target="vi")
@@ -175,10 +176,80 @@ fsrs_app = Scheduler()
 
 vm.init_database(DB_PATH)
 # ===========================================================================
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+VIDEO_PATH = os.path.join(BASE_DIR, "datasets", "Videos", "The_benefits_of_doing_nothing.mp4")# ===========================================================================
 
 with gr.Blocks(title="Demo English") as demo:
     with gr.Tabs():
+        with gr.Tab("Listening"):
+            transcript_state = gr.State("")
+            questions_state = gr.State([])
+            current_index_state = gr.State(0)
+            answers_state = gr.State([])
+
+            with gr.Row():
+
+                with gr.Column(elem_id="video-wrap"):
+                    gr.Markdown("# <center>Listening Test</center>")
+
+                    video_player = gr.Video(label="Video Player", autoplay=True)
+                    play_btn = gr.Button("Phát Video")
+
+                    start_quiz_btn = gr.Button("🎧 Bắt đầu bài luyện nghe", variant="primary")
+
+                    loading_display = gr.Markdown(value="", visible=False)
+
+                    with gr.Group(visible=False, elem_classes="feedback-card") as question_group:
+                        progress_display = gr.Markdown("Câu 1 / 3")
+                        question_display = gr.Markdown("")
+                        answer_input = gr.Textbox(
+                            label="Câu trả lời của bạn",
+                            lines=3,
+                            placeholder="Nhập câu trả lời của bạn..."
+                        )
+                        submit_answer_btn = gr.Button("Câu tiếp theo →", variant="primary")
+
+                    with gr.Group(visible=False) as score_group:
+                        gr.Markdown("### 📊 KẾT QUẢ BÀI LUYỆN NGHE")
+                        score_display = gr.HTML()
+
+
+            play_btn.click(
+                fn=lambda: lm.load_video(VIDEO_PATH),
+                outputs=video_player)
+
+            start_quiz_btn.click(
+                fn=lambda: (
+                    gr.update(interactive=False),
+                    gr.update(visible=True, value="⏳ Đang xử lý audio và tạo câu hỏi, vui lòng chờ trong giây lát...")
+                ),
+                inputs=None,
+                outputs=[start_quiz_btn, loading_display]
+            ).then(
+                fn=lambda: lm.start_listening_quiz(model_whisper, client, VIDEO_PATH),
+                inputs=None,
+                outputs=[
+                    transcript_state, questions_state, current_index_state, answers_state,
+                    start_quiz_btn, question_group, question_display, answer_input,
+                    progress_display, score_group, score_display, submit_answer_btn
+                ]
+            ).then(
+                fn=lambda: (gr.update(interactive=True), gr.update(visible=False, value="")),
+                inputs=None,
+                outputs=[start_quiz_btn, loading_display]
+            )
+
+            submit_answer_btn.click(
+                fn=lambda a1, b1, c1, d1, e1: lm.submit_listening_answer(client, a1, b1, c1, d1, e1),
+                inputs=[current_index_state, answer_input, transcript_state, questions_state, answers_state],
+                outputs=[
+                    current_index_state, answers_state,
+                    question_display, answer_input, progress_display,
+                    question_group, score_group, score_display, submit_answer_btn
+                ]
+            )
+
+        ################################################################################
         with gr.Tab("Speaking"):
             with gr.Row():
                 with gr.Column(scale=3):
@@ -217,82 +288,7 @@ with gr.Blocks(title="Demo English") as demo:
                 inputs=[audio_input, conversation_history],
                 outputs=[conversation_history, feedback_output, suggestions_output, audio_input]
             )
-        #################################################################################
-        with gr.Tab("Essay Scoring"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    essay_topic = gr.Textbox(
-                        label="Essay Topic / Prompt",
-                        placeholder="e.g., Some people think that robots are important for...",
-                        lines=2
-                    )
-                    essay_content = gr.Textbox(
-                        label="Your Essay",
-                        placeholder="Start typing your essay here...",
-                        lines=21,
-                        max_length=2500
-                    )
-                    submit_btn = gr.Button("Submit for Evaluation", variant="primary")
 
-                    with gr.Column(scale=1, variant="panel"):
-                        with gr.Group():
-                            gr.Markdown("<h3 style='margin: 0; font-size: 16px;'>📊 Evaluation Summary</h3>")
-
-                            with gr.Row(elem_id="score-summary-container"):
-                                with gr.Column(scale=1, min_width=110):
-                                    total_band_display = gr.HTML(
-                                        value="""
-                                                <div style="display: flex; justify-content: center; align-items: center; flex-direction: column; padding-top: 10px;">
-                                                    <div style="width: 80px; height: 80px; border-radius: 50%; border: 5px solid #e5e7eb; display: flex; justify-content: center; align-items: center; margin-bottom: 5px;">
-                                                        <span style="font-size: 20px; font-weight: bold; color: gray;">--</span>
-                                                    </div>
-                                                    <span style="color: #6b7280; font-size: 11px; font-weight: 600; text-transform: uppercase;">Estimated Band</span>
-                                                </div>
-                                                """
-                                    )
-
-                                with gr.Column(scale=3, min_width=250):
-                                    with gr.Row():
-                                        score_cohesion = gr.Label(label="Cohesion", value="0/5", min_width=60)
-                                        score_syntax = gr.Label(label="Syntax", value="0/5", min_width=60)
-                                        score_vocab = gr.Label(label="Vocabulary", value="0/5", min_width=60)
-                                    with gr.Row():
-                                        score_phraseology = gr.Label(label="Phraseology", value="0/5", min_width=60)
-                                        score_grammar = gr.Label(label="Grammar", value="0/5", min_width=60)
-                                        score_conventions = gr.Label(label="Conventions", value="0/5", min_width=60)
-
-                        gr.Markdown("<hr style='margin: 10px 0;'/>")
-
-                        with gr.Group():
-                            gr.Markdown(
-                                "<h3 style='margin: 0 0 5px 0; font-size: 16px;'>💡 AI Feedback & Corrections</h3>")
-
-                            essay_feedback_display = gr.HTML(
-                                value="""
-                                        <div class="feedback-scroll-container">
-                                            <span style='color: gray; font-style: italic;'>Kết quả nhận xét và sửa lỗi chi tiết từ AI sẽ hiển thị tại đây...</span>
-                                        </div>
-                                        """
-                            )
-
-            result_output = gr.Markdown()
-
-            submit_btn.click(
-                fn=lambda content: esm.handle_essay_scoring(
-                    content,
-                    essay_scoring_tokenizer,
-                    essay_scoring_model,
-                    ESSAY_MAX_LEN,
-                    ESSAY_SCORE_MIN,
-                    ESSAY_SCORE_MAX,
-                    ESSAY_SCORING_COLUMNS,
-                    device,
-                    client
-                ),
-                inputs=[essay_content],
-                outputs=[total_band_display, score_cohesion, score_syntax, score_vocab,
-                         score_phraseology, score_grammar, score_conventions, essay_feedback_display]
-            )
 
     #################################################################################
         with gr.Tab("Reading"):
@@ -355,6 +351,12 @@ with gr.Blocks(title="Demo English") as demo:
                         interactive = False
                     )
 
+                    phonetic_word = gr.Textbox(
+                        label="Phiên âm (IPA)",
+                        interactive=False,
+                        placeholder="/.../"
+                    )
+
                     add_fsrs_btn = gr.Button("➕ Save to FSRS", variant = "primary")
 
                     save_status_lbl = gr.Markdown(value="", elem_id="save-status-container")
@@ -382,20 +384,96 @@ with gr.Blocks(title="Demo English") as demo:
             )
 
             selected_word_txt.change(
-                fn= lambda text: rm.translate_and_get_cefr_with_excel(CEFR_DICT, translator,lemmatizer, text),
+                fn=lambda text: rm.translate_and_get_cefr_with_excel(CEFR_DICT, translator, lemmatizer, text),
                 inputs=[selected_word_txt],
-                outputs=[translated_word, ceft_word]
+                outputs=[translated_word, ceft_word, phonetic_word]
+            )
+
+    #################################################################################
+        with gr.Tab("Writting"):
+            with gr.Row(elem_id="writing-tab-row", equal_height=False):
+                with gr.Column(scale=1):
+                    essay_topic = gr.Textbox(
+                        label="Essay Topic / Prompt",
+                        placeholder="e.g., Some people think that robots are important for...",
+                        lines=2
+                    )
+                    essay_content = gr.Textbox(
+                        label="Your Essay",
+                        placeholder="Start typing your essay here...",
+                        lines=18,
+                        max_length=2500
+                    )
+                    submit_btn = gr.Button("Submit for Evaluation", variant="primary")
+
+                with gr.Column(scale=1, min_width=320, variant="panel", elem_id="writing-summary-panel"):
+                    with gr.Group():
+                        gr.Markdown("### 📊 Evaluation Summary")
+
+                        with gr.Row(elem_id="score-summary-container"):
+                            with gr.Column(scale=1, min_width=110):
+                                total_band_display = gr.HTML(
+                                    value="""
+                                                <div class="band-seal">
+                                                    <div class="band-ring" style="--pct: 0;">
+                                                        <div class="band-ring-inner">
+                                                            <span class="band-number">--</span>
+                                                        </div>
+                                                    </div>
+                                                    <span class="band-caption">Estimated Band</span>
+                                                </div>
+                                                """
+                                )
+
+                            with gr.Column(scale=3, min_width=220):
+                                with gr.Row():
+                                    score_cohesion = gr.Label(label="Cohesion", value="0/5", min_width=60)
+                                    score_syntax = gr.Label(label="Syntax", value="0/5", min_width=60)
+                                    score_vocab = gr.Label(label="Vocabulary", value="0/5", min_width=60)
+                                with gr.Row():
+                                    score_phraseology = gr.Label(label="Phraseology", value="0/5", min_width=60)
+                                    score_grammar = gr.Label(label="Grammar", value="0/5", min_width=60)
+                                    score_conventions = gr.Label(label="Conventions", value="0/5", min_width=60)
+
+                    with gr.Group():
+                        gr.Markdown("### 💡 AI Feedback & Corrections")
+
+                        essay_feedback_display = gr.HTML(
+                            value="""
+                                        <div class="feedback-card feedback-container feedback-empty">
+                                            <p class="feedback-empty-text">Kết quả nhận xét và sửa lỗi chi tiết từ AI sẽ hiển thị tại đây...</p>
+                                        </div>
+                                        """
+                        )
+
+            result_output = gr.Markdown()
+
+            submit_btn.click(
+                fn=lambda content: wm.handle_essay_scoring(
+                    content,
+                    essay_scoring_tokenizer,
+                    essay_scoring_model,
+                    ESSAY_MAX_LEN,
+                    ESSAY_SCORE_MIN,
+                    ESSAY_SCORE_MAX,
+                    ESSAY_SCORING_COLUMNS,
+                    device,
+                    client
+                ),
+                inputs=[essay_content],
+                outputs=[total_band_display, score_cohesion, score_syntax, score_vocab,
+                         score_phraseology, score_grammar, score_conventions, essay_feedback_display]
             )
 
     #################################################################################
         with gr.Tab("Vocabulary"):
             due_list_state = gr.State(value=[])
-            with gr.Row():
-                with gr.Column(scale=1):
+            with gr.Row(elem_id="vocab-stats-row"):
+                with gr.Column(scale=1, min_width=0):
                     stat_due = gr.HTML()
-                with gr.Column(scale=1):
+                with gr.Column(scale=1, min_width=0):
                     stat_total = gr.HTML()
-                with gr.Column(scale=1):
+                with gr.Column(scale=1, min_width=0):
                     stat_completed = gr.HTML()
 
             with gr.Row():
@@ -406,11 +484,9 @@ with gr.Blocks(title="Demo English") as demo:
                     progress_bar_html = gr.HTML()
 
             with gr.Row():
-                with gr.Column(scale=1):
-                    pass
 
                 with gr.Column(scale=4):
-                    with gr.Group(elem_classes="flashcard-container"):
+                    with gr.Group(elem_classes="flashcard-container", elem_id="flashcard-wrap"):
 
                         word_index_display = gr.HTML()
                         word_main_display = gr.HTML()
@@ -419,21 +495,19 @@ with gr.Blocks(title="Demo English") as demo:
                             btn_show = gr.Button("Check answer", variant="primary", elem_classes=["custom-btn-show"])
 
                         with gr.Column(visible=False) as area_answer:
-                            cefr_display = gr.HTML()
+                            cefr_display = gr.HTML(sanitize_html=False)
                             gr.HTML("<div style='height: 15px;'></div>")
 
-                        with gr.Row(visible=False) as fsrs_buttons_row:
-                            btn_again = gr.Button("Again", elem_classes=["btn-fsrs", "btn-again"], min_width=250)
-                            btn_hard = gr.Button("Hard", elem_classes=["btn-fsrs", "btn-hard"], min_width=250)
-                            btn_good = gr.Button("Good", elem_classes=["btn-fsrs", "btn-good"], min_width=250)
-                            btn_easy = gr.Button("Easy", elem_classes=["btn-fsrs", "btn-easy"], min_width=250)
+                        with gr.Row(visible=False, elem_classes=["fsrs-buttons-row"]) as fsrs_buttons_row:
+                            btn_again = gr.Button("Again", elem_classes=["btn-fsrs", "btn-again"], min_width=110)
+                            btn_hard = gr.Button("Hard", elem_classes=["btn-fsrs", "btn-hard"], min_width=110)
+                            btn_good = gr.Button("Good", elem_classes=["btn-fsrs", "btn-good"], min_width=110)
+                            btn_easy = gr.Button("Easy", elem_classes=["btn-fsrs", "btn-easy"], min_width=110)
 
                         with gr.Column(visible=False) as area_empty:
                             gr.Markdown("### 🎉 Congratulation! You have done all words today.")
                             btn_refresh = gr.Button("Check again", variant="secondary")
 
-                with gr.Column(scale=1):
-                    pass
 
         btn_show.click(
             fn=vm.show_answer_action,
@@ -476,8 +550,8 @@ with gr.Blocks(title="Demo English") as demo:
         )
 
         add_fsrs_btn.click(
-            fn=lambda w, c, m: rm.add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, w, c, m),
-            inputs=[selected_word_txt, ceft_word, translated_word],
+            fn=lambda w, c, m, p: rm.add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, w, c, m, p),
+            inputs=[selected_word_txt, ceft_word, translated_word, phonetic_word],
             outputs=[*vocab_outputs, save_status_lbl],
             show_progress="hidden"
         )
