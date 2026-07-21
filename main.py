@@ -73,35 +73,7 @@ retriever = sm.rag_with_faiss(model_name, storage_database)
 chat_session = SimpleChatSessionManager()
 initial_greeting = "Hello! Welcome to our store. What would you like to buy today?"
 chat_session.add_message("assistant", initial_greeting)
-# ===========================================================================
-def process_voice_gradio(audio_path, current_chat_history):
-    if not audio_path:
-        return current_chat_history, "Vui lòng ghi âm trước."
 
-    if not client:
-        return current_chat_history, "Vui lòng cấu hình biến môi trường GEMINI_API_KEY."
-
-    try:
-        with open(audio_path, "rb") as f:
-            file_content = f.read()
-
-        transcribed_text = sm.extract_text(file_content, model_whisper)
-        phonemes_text = sm.extract_phonemes(file_content, wav2vec2_processor, wav2vec2_model, device)
-
-        # transcribed_text = "I want to buy 2 coca-cola"
-
-        full_ai_response, reply_text, feedback_text, suggestions_text = sm.generate_ai_response(transcribed_text, phonemes_text, retriever, client, chat_session)
-
-        if current_chat_history is None:
-            current_chat_history = []
-
-        current_chat_history.append({"role": "user", "content": transcribed_text})
-        current_chat_history.append({"role": "assistant", "content": reply_text})
-
-        return current_chat_history, feedback_text, suggestions_text, None
-
-    except Exception as e:
-        return current_chat_history, f"Lỗi xử lý: {str(e)}", "", None
 # ===========================================================================
 ESSAY_SCORING_COLUMNS = ["Cohesion", "Syntax", "Vocabulary", "Phraseology", "Grammar", "Conventions"]
 ESSAY_MODEL_NAME = "microsoft/deberta-v3-base"
@@ -177,7 +149,8 @@ fsrs_app = Scheduler()
 vm.init_database(DB_PATH)
 # ===========================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VIDEO_PATH = os.path.join(BASE_DIR, "datasets", "Videos", "The_benefits_of_doing_nothing.mp4")# ===========================================================================
+VIDEO_PATH = os.path.join(BASE_DIR, "datasets", "Videos", "The_benefits_of_doing_nothing.mp4")
+# ===========================================================================
 
 with gr.Blocks(title="Demo English") as demo:
     with gr.Tabs():
@@ -284,7 +257,7 @@ with gr.Blocks(title="Demo English") as demo:
                     )
 
             audio_input.stop_recording(
-                fn=process_voice_gradio,
+                fn=lambda x, y: sm.process_voice_gradio(client, model_whisper, wav2vec2_processor, wav2vec2_model, device, retriever, chat_session, x, y),
                 inputs=[audio_input, conversation_history],
                 outputs=[conversation_history, feedback_output, suggestions_output, audio_input]
             )

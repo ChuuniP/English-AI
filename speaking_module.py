@@ -7,6 +7,33 @@ from scipy import signal
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
+def process_voice_gradio(client, model_whisper, wav2vec2_processor, wav2vec2_model, device, retriever, chat_session, audio_path, current_chat_history):
+    if not audio_path:
+        return current_chat_history, "Vui lòng ghi âm trước."
+
+    if not client:
+        return current_chat_history, "Vui lòng cấu hình biến môi trường GEMINI_API_KEY."
+
+    try:
+        with open(audio_path, "rb") as f:
+            file_content = f.read()
+
+        transcribed_text = extract_text(file_content, model_whisper)
+        phonemes_text = extract_phonemes(file_content, wav2vec2_processor, wav2vec2_model, device)
+        transcribed_text = "I want to buy 2 coca-colas"
+        full_ai_response, reply_text, feedback_text, suggestions_text = generate_ai_response(transcribed_text, phonemes_text, retriever, client, chat_session)
+
+        if current_chat_history is None:
+            current_chat_history = []
+
+        current_chat_history.append({"role": "user", "content": transcribed_text})
+        current_chat_history.append({"role": "assistant", "content": reply_text})
+
+        return current_chat_history, feedback_text, suggestions_text, None
+
+    except Exception as e:
+        return current_chat_history, f"Lỗi xử lý: {str(e)}", "", None
+
 def rag_with_faiss(model_name, storage_database):
     embedding = HuggingFaceEmbeddings(model_name=model_name)
     vector_db = FAISS.from_texts(texts=storage_database, embedding=embedding)

@@ -24,7 +24,6 @@ def init_database(DB_PATH):
         """)
     conn.commit()
 
-    # Hỗ trợ nâng cấp CSDL cũ (đã tồn tại trước khi có cột phonetic)
     cursor.execute("PRAGMA table_info(user_vocabulary)")
     existing_cols = [col[1] for col in cursor.fetchall()]
     if "phonetic" not in existing_cols:
@@ -40,6 +39,7 @@ def load_review_session(DB_PATH):
     total_vocab = cursor.fetchone()[0]
 
     now = datetime.datetime.now(datetime.timezone.utc)
+    today = now.date()
     cursor.execute("SELECT word, cefr_j, meaning, phonetic, state, stability, difficulty, elapsed_days, scheduled_days, last_review, due FROM user_vocabulary")
     rows = cursor.fetchall()
     conn.close()
@@ -49,11 +49,15 @@ def load_review_session(DB_PATH):
     for row in rows:
         state_val = int(row[4])
         due_time = datetime.datetime.fromisoformat(row[10])
+        last_review_str = row[9]
 
         if state_val == 0 or due_time <= now:
             due_list.append(row)
-        else:
-            completed_count += 1
+        elif last_review_str:
+            last_review_dt = datetime.datetime.fromisoformat(last_review_str)
+            if last_review_dt.astimezone(datetime.timezone.utc).date() == today:
+                completed_count += 1
+        # từ đã ôn xong từ những ngày trước và chưa tới hạn -> không tính vào completed_count nữa
 
     total_due = len(due_list) + completed_count
     if not due_list:
@@ -65,8 +69,36 @@ def load_review_session(DB_PATH):
             current_word_data[0], current_word_data[1], current_word_data[2], current_word_data[3],
             due_list, gr.update(visible=True), gr.update(visible=False), gr.update(visible=False))
 
-def show_answer_action():
-    return gr.update(visible=False), gr.update(visible=True), gr.update(visible=True)
+def _build_cefr_html(cefr, meaning, phonetic, word):
+    safe_word_for_js = str(word).replace("\\", "\\\\").replace("'", "\\'")
+    phonetic_html = f"<div style='font-size: 18px; color: #6b7280; font-style: italic; margin-top: 8px;'>/{phonetic}/</div>" if phonetic else ""
+    pronounce_btn = f"""
+    <button type="button" class="btn-pronounce"
+        onclick="try {{ const u = new SpeechSynthesisUtterance('{safe_word_for_js}'); u.lang = 'en-US'; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); }} catch(e) {{ console.error(e); }}"
+        style="margin-top: 8px; padding: 4px 12px; border-radius: 6px; border: 1px solid #2f73d8; background: transparent; color: #2f73d8; cursor: pointer; font-size: 14px;">
+        🔊 Phát âm
+    </button>
+    """
+    return f"""
+    <div style='font-size: 18px; color: #2f73d8; font-weight: bold;'>Cefr: {cefr}</div>
+    <div style='font-size: 18px; color: #10b981; font-weight: bold; margin-top: 8px;'>Nghĩa: {meaning}</div>
+    {phonetic_html}
+    {pronounce_btn}
+    """
+
+def show_answer_action(due_list_state):
+    if due_list_state:
+        word, cefr, meaning, phonetic, *_ = due_list_state[0]
+        cefr_html = _build_cefr_html(cefr, meaning, phonetic, word)
+    else:
+        cefr_html = ""
+
+    return (
+        gr.update(visible=False),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        gr.update(value=cefr_html, visible=True)   # set lại value thật, không chỉ visible
+    )
 
 def review_word_action(DB_PATH, fsrs_app, choice_str, due_list_state):
     if not due_list_state:

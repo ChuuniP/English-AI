@@ -1,0 +1,266 @@
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+/* --- SIDEBAR --- */
+.sidebar-btn {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    border: none !important;
+    background: transparent !important;
+    font-size: 16px !important;
+    color: #475569 !important;
+}
+.sidebar-active-btn {
+    background-color: #3b82f6 !important;
+    color: white !important;
+    border-radius: 8px !important;
+}
+
+/* --- UTILITIES & SPACERS --- */
+.spacer-20 {
+    height: 20px;
+}
+
+/* --- STAT CARDS (VOCABULARY) --- */
+.stat-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    border: 1px solid #f1f5f9;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+.stat-card-grow {
+    flex-grow: 2;
+}
+.stat-icon {
+    width: 45px;
+    height: 45px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+}
+.stat-icon-blue {
+    background: #eff6ff;
+    color: #3b82f6;
+}
+.stat-icon-green {
+    background: #f0fdf4;
+    color: #22c55e;
+}
+
+/* --- FLASHCARDS --- */
+.flashcard {
+    background: white;
+    border-radius: 24px;
+    padding: 80px 40px;
+    text-align: center;
+    box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.1);
+    border: 1px solid #e2e8f0;
+    margin: 40px auto;
+    max-width: 600px;
+}
+.flashcard h1 {
+    font-size: 48px;
+    color: #1e293b;
+    letter-spacing: 2px;
+    margin-bottom: 10px;
+}
+.flashcard-category {
+    color: #64748b;
+    font-size: 14px;
+    text-transform: uppercase;
+}
+
+/* --- FEEDBACK & CONTAINERS --- */
+.feedback-box {
+    background: white;
+    border-radius: 12px;
+    padding: 15px;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 10px;
+}
+
+.progress-bar-container {
+    background: #e2e8f0;
+    border-radius: 10px;
+    height: 8px;
+    width: 100%;
+    margin-top: 8px;
+}
+.progress-fill {
+    background: #22c55e;
+    height: 100%;
+    border-radius: 10px;
+}
+
+/* --- AUDIO COMPONENT (SPEAKING TAB) --- */
+
+/* Ẩn dropdown thiết bị */
+#hide-dropdown-audio select,
+#hide-dropdown-audio .device-select,
+#hide-dropdown-audio [data-testid="music-icon"] + div {
+    display: none !important;
+}
+
+/* Ẩn TẤT CẢ nút trong khu vực audio */
+#hide-dropdown-audio button,
+.speaking-record-audio button {
+    display: none !important;
+}
+
+/* Chỉ hiện lại duy nhất nút ghi âm */
+#hide-dropdown-audio button:first-of-type {
+    max-width: 220px !important;
+    margin: 12px auto !important;
+    border-radius: 24px !important;
+    justify-content: center !important;
+    background: #1B2A45 !important;
+    color: #FAF8F3 !important;
+    font-size: 13px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border: none !important;
+    padding: 10px 20px !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    white-space: nowrap !important;
+    transition: background-color 0.2s ease !important;
+}
+
+#hide-dropdown-audio button:first-of-type:hover {
+    background: #3C4A66 !important;
+}
+
+/* Đổi màu đỏ khi đang ghi âm (trạng thái "Stop") */
+#hide-dropdown-audio button:first-of-type[aria-label*="Stop"] {
+    background-color: #AE4A3B !important;
+}
+
+#hide-dropdown-audio button:first-of-type[aria-label*="Stop"]:hover {
+    background-color: #963b2f !important;
+}
+
+/* Container wrapper Speaking */
+.speaking-record-audio {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+}
+
+.speaking-record-audio > div,
+.speaking-record-audio .wrap,
+.speaking-record-audio .audio-container {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+#hide-dropdown-audio button.clear-button,
+#hide-dropdown-audio .clear-button,
+#hide-dropdown-audio button[aria-label="Clear"],
+#hide-dropdown-audio button[aria-label="Remove input"] {
+    display: none !important;
+}
+
+/* Nút Cảnh báo Speak */
+.tip-btn {
+    width: 40px !important;
+    min-width: 40px !important;
+    max-width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    max-height: 40px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+    margin-top: 17px !important;
+}
+
+.audio-row {
+    margin-top: -20px !important;
+}
+
+#hide-dropdown-audio {
+    height: 40px !important;
+    min-height: 40px !important;
+    max-height: 40px !important;
+}
+
+/* --- TAB 5: READING INTERFACE --- */
+
+/* Highlight từ vựng trong bài đọc */
+.highlight-word {
+    background: #eff6ff;
+    border-bottom: 2px solid #3b82f6;
+    color: #2563eb;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 1px 4px;
+    border-radius: 3px;
+    transition: background 0.2s;
+}
+.highlight-word.active, .highlight-word:hover {
+    background: #dbeafe;
+}
+
+/* --- WRITING CUSTOM SCORING LABELS --- */
+
+/* Khung gr.Label dạng hàng ngang */
+.custom-score-label {
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    background-color: #f0f4ff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 10px 16px !important;
+    min-height: 46px !important;
+    box-shadow: none !important;
+}
+
+/* Format tên nhãn (ví dụ: Cohesion) nằm bên trái */
+.custom-score-label .block-label {
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    color: #475569 !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+}
+
+/* Format điểm số (ví dụ: 0/5) nằm bên phải */
+.custom-score-label .label-val,
+.custom-score-label .output-class,
+.custom-score-label .main-val {
+    color: #10b981 !important;
+    font-weight: bold !important;
+    font-size: 16px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Loại bỏ các phần tử phụ của component Label mặc định */
+.custom-score-label .confidence-bar,
+.custom-score-label .progress-bar,
+.custom-score-label .sr-only,
+.custom-score-label svg,
+.custom-score-label button {
+    display: none !important;
+}
