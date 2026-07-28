@@ -115,7 +115,7 @@
 /* Chỉ hiện lại duy nhất nút ghi âm */
 #hide-dropdown-audio button:first-of-type {
     max-width: 220px !important;
-    margin: 12px auto !important;
+    margin: 0 !important;
     border-radius: 24px !important;
     justify-content: center !important;
     background: #1B2A45 !important;
@@ -124,16 +124,35 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     border: none !important;
-    padding: 10px 20px !important;
+    padding: 12px 20px !important;
     display: flex !important;
     align-items: center !important;
     gap: 8px !important;
     white-space: nowrap !important;
     transition: background-color 0.2s ease !important;
+    height: auto !important;
+    min-height: 44px !important;
 }
 
 #hide-dropdown-audio button:first-of-type:hover {
     background: #3C4A66 !important;
+}
+
+#hide-dropdown-audio,
+#hide-dropdown-audio .audio-container,
+#hide-dropdown-audio .wrap {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 10px !important;
+    flex-wrap: nowrap !important;
+}
+
+#hide-dropdown-audio button.clear-button,
+#hide-dropdown-audio .clear-button,
+#hide-dropdown-audio button[aria-label="Clear"],
+#hide-dropdown-audio button[aria-label="Remove input"] {
+    display: none !important;
 }
 
 /* Đổi màu đỏ khi đang ghi âm (trạng thái "Stop") */
@@ -187,17 +206,67 @@
     justify-content: center !important;
     align-items: center !important;
     text-align: center !important;
-    margin-top: 17px !important;
+    margin-top: 0px !important;
 }
 
 .audio-row {
-    margin-top: -20px !important;
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    gap: 12px !important;
+    margin-top: 0px !important;
+    width: 100% !important;
 }
 
 #hide-dropdown-audio {
-    height: 40px !important;
-    min-height: 40px !important;
-    max-height: 40px !important;
+    height: auto !important;
+    min-height: 64px !important;
+    max-height: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-wrap: nowrap !important;
+    gap: 10px !important;
+    min-width: 0 !important;
+}
+
+#hide-dropdown-audio * {
+    white-space: nowrap !important;
+}
+
+#hide-dropdown-audio .audio-container,
+#hide-dropdown-audio .wrap,
+#hide-dropdown-audio .record,
+#hide-dropdown-audio .time,
+#hide-dropdown-audio .controls,
+#hide-dropdown-audio .component-wrapper,
+#hide-dropdown-audio .control-wrapper,
+#hide-dropdown-audio .play-pause-wrapper,
+#hide-dropdown-audio .settings-wrapper,
+#hide-dropdown-audio footer {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-wrap: nowrap !important;
+}
+
+#hide-dropdown-audio .audio-container {
+    flex-direction: row !important;
+    gap: 10px !important;
+}
+
+#hide-dropdown-audio footer {
+    gap: 10px !important;
+}
+
+#hide-dropdown-audio footer > * {
+    flex-shrink: 0 !important;
+}
+
+#hide-dropdown-audio time {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }
 
 /* --- TAB 5: READING INTERFACE --- */
@@ -263,4 +332,39 @@
 .custom-score-label svg,
 .custom-score-label button {
     display: none !important;
+}
+
+#btn-next-toggle {
+    display: inline-flex !important;
+}
+#btn-next-toggle:disabled {
+    display: none !important;
+}
+
+.waveform-container, .wave-container, canvas {
+    display: none !important;
+}
+
+/* Ẩn nút Share và Download */
+button[aria-label="Share"],
+button[aria-label="Download"],
+a[download] {
+    display: none !important;
+}
+
+#custom_green_btn {
+    background-color: #28a745 !important; /* Màu xanh lá */
+    color: white !important;               /* Chữ màu trắng */
+    border: none !important;
+}
+
+#custom_green_btn:hover {
+    background-color: #218838 !important; /* Màu xanh lá đậm hơn khi di chuột */
+}
+
+.bordered-row-column {
+    border: 2px solid #000000 !important; /* Đã đổi sang màu đen */
+    border-radius: 10px !important;
+    padding: 15px !important;
+    color: #ffffff !important;
 }

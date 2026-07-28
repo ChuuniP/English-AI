@@ -14,6 +14,8 @@ project_root = os.path.dirname(current_script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
+sys.path.append(os.path.join(current_script_dir, "..", "database"))
+
 import speaking_module as sm
 from agent import SimpleChatSessionManager
 import writting_module as wm
@@ -25,6 +27,7 @@ import pandas as pd
 import nltk
 from nltk.stem import WordNetLemmatizer
 import listening_module as lm
+import spacy
 
 # ---------- KHAI BÁO PATH ----------
 TEMP_DIR = os.getenv("APP_TEMP_DIR", os.path.join(project_root, "temp"))
@@ -49,8 +52,9 @@ vm.init_database(DB_PATH)
 
 # ---------- KHAI BÁO LISTENING ----------
 VIDEO_PATH = os.path.join(project_root, "datasets", "Videos", "The_benefits_of_doing_nothing.mp4")
-print(VIDEO_PATH)
-
+AUDIO_PATH = os.path.join(project_root, "datasets", "short_audios", "being_single.mp3")
+AUDIO_PATH_FOLDER = os.path.join(project_root, "datasets", "short_audios")
+nlp = spacy.load("en_core_web_sm")
 # ---------- KHAI BÁO SPEAKING ----------
 storage_database = [
     "Product: Fresh Milk | Price: $3.00 per carton | Stock: 15 left | Discount: 10% off if you buy 2.",
@@ -266,66 +270,260 @@ with gr.Blocks() as demo:
                 current_index_state = gr.State(0)
                 answers_state = gr.State([])
 
-                with gr.Row():
-                    with gr.Column(elem_id="video-wrap"):
-                        gr.Markdown("# <center>Listening Test</center>")
+                state_words_data = gr.State([])
+                state_current_index = gr.State(0)
+                state_score = gr.State(0)
+                cefr_dict_sample = lm.get_ceft_word(DICTIONARY_PATH)
 
-                        video_player = gr.Video(label="Video Player", autoplay=True)
-                        play_btn = gr.Button("Phát Video")
-
-                        start_quiz_btn = gr.Button("🎧 Bắt đầu bài luyện nghe", variant="primary")
-
-                        loading_display = gr.Markdown(value="", visible=False)
-
-                        with gr.Group(visible=False, elem_classes="feedback-card") as question_group:
-                            progress_display = gr.Markdown("Câu 1 / 3")
-                            question_display = gr.Markdown("")
-                            answer_input = gr.Textbox(
-                                label="Câu trả lời của bạn",
-                                lines=3,
-                                placeholder="Nhập câu trả lời của bạn..."
+                with gr.Tabs():
+                    with gr.Tab("Word"):
+                        with gr.Column() as setup_panel:
+                            gr.Markdown("### Chọn cấp độ và bắt đầu")
+                            ceft_level = gr.Radio(
+                                choices = ["A1", "A2", "B1", "B2", "C1"],
+                                value = "A1",
+                                label = "Choose Ceft"
                             )
-                            submit_answer_btn = gr.Button("Câu tiếp theo →", variant="primary")
+                            btn_start = gr.Button("🚀 Bắt đầu luyện nghe", variant="primary")
+                            status_output = gr.Markdown("")
 
-                        with gr.Group(visible=False) as score_group:
-                            gr.Markdown("### 📊 KẾT QUẢ BÀI LUYỆN NGHE")
-                            score_display = gr.HTML()
+                        with gr.Column(visible = False) as practice_panel:
+                            progress_tracker = gr.Markdown("### Câu 1/10")
+                            audio_player = gr.Audio(label="Phát âm thanh câu ví dụ", interactive=False)
 
-                play_btn.click(
-                    fn=lambda: lm.load_video(VIDEO_PATH),
-                    outputs=video_player)
+                            gr.Markdown("### Điền từ còn thiếu  vào ô trống ")
+                            sentence_display = gr.Markdown(label="Câu ví dụ")
 
-                start_quiz_btn.click(
-                    fn=lambda: (
-                        gr.update(interactive=False),
-                        gr.update(visible=True,
-                                  value="⏳ Đang xử lý audio và tạo câu hỏi, vui lòng chờ trong giây lát...")
-                    ),
-                    inputs=None,
-                    outputs=[start_quiz_btn, loading_display]
-                ).then(
-                    fn=lambda: lm.start_listening_quiz(model_whisper, client, VIDEO_PATH),
-                    inputs=None,
-                    outputs=[
-                        transcript_state, questions_state, current_index_state, answers_state,
-                        start_quiz_btn, question_group, question_display, answer_input,
-                        progress_display, score_group, score_display, submit_answer_btn
-                    ]
-                ).then(
-                    fn=lambda: (gr.update(interactive=True), gr.update(visible=False, value="")),
-                    inputs=None,
-                    outputs=[start_quiz_btn, loading_display]
-                )
+                            user_answer = gr.Textbox(
+                                label="Từ còn thiếu trong ô trống:",
+                                placeholder="Nhập từ bạn nghe được...",
+                            )
 
-                submit_answer_btn.click(
-                    fn=lambda a1, b1, c1, d1, e1: lm.submit_listening_answer(client, a1, b1, c1, d1, e1),
-                    inputs=[current_index_state, answer_input, transcript_state, questions_state, answers_state],
-                    outputs=[
-                        current_index_state, answers_state,
-                        question_display, answer_input, progress_display,
-                        question_group, score_group, score_display, submit_answer_btn
-                    ]
-                )
+
+                            btn_check = gr.Button("🔍 Check Answer", variant="primary")
+                            feedback_display = gr.Markdown("")
+
+                        with gr.Column(visible=False) as next_panel:
+                            btn_next = gr.Button(
+                                "Câu tiếp theo ➡️", variant="primary"
+                            )
+
+                        with gr.Column(visible=False) as result_panel:
+                            summary_display = gr.Markdown("")
+                            btn_restart = gr.Button("🔄 Luyện tập lượt mới", variant="secondary")
+
+                    btn_start.click(
+                        fn=lambda level: lm.process_start_practice(client, cefr_dict_sample, level),
+                        inputs=[ceft_level],
+                        outputs=[
+                            setup_panel,
+                            practice_panel,
+                            state_words_data,
+                            state_current_index,
+                            state_score,
+                            status_output,
+                            progress_tracker,
+                            sentence_display,
+                            audio_player,
+                            user_answer,
+                            feedback_display,
+                            btn_check,
+                        ]
+                    )
+
+                    btn_check.click(
+                        fn=lm.check_answer,
+                        inputs=[user_answer, state_current_index, state_words_data, state_score],
+                        outputs=[state_score, feedback_display, btn_check, next_panel, btn_next]
+                    )
+
+                    btn_next.click(
+                        fn=lm.next_question,
+                        inputs=[state_current_index, state_words_data, state_score],
+                        outputs=[
+                            state_current_index, progress_tracker, sentence_display, audio_player,
+                            user_answer, feedback_display, btn_check, next_panel, practice_panel,
+                            result_panel, summary_display
+                        ]
+                    )
+
+                    btn_restart.click(
+                        fn=lm.reset_to_start,
+                        inputs=[],
+                        outputs=[setup_panel, practice_panel,next_panel, result_panel]
+                    )
+
+                    with gr.Tab("Paragraph") as tab_listen:
+
+                        with gr.Column() as select_topic_panel:
+                            topic_dropdown = gr.Dropdown(label="Select topic to listen", filterable=True, interactive=True,)
+                            topic_selected_btn = gr.Button("Select")
+
+                        with gr.Column(elem_classes=["bordered-row-column"], visible=False) as audio_content_panel:
+                            audio_listen_paragraph = gr.Audio(
+                                label="Phát âm thanh câu",
+                                value=AUDIO_PATH,
+                                interactive=False,
+                            )
+                            transcript_text_paragraph = gr.Markdown("")
+
+                        PAGE_SIZE = 4
+
+                        answers_state_listen_paragraph = gr.State([])
+                        user_answers_state = gr.State([])
+                        current_page = gr.State(0)
+
+                        answer_boxes = []
+
+                        with gr.Row(elem_classes=["bordered-row-column"], visible=False) as answer_paragraph_panel:
+                            gr.Markdown("### Fill words into blanks")
+                            for i in range(PAGE_SIZE):
+                                answer_boxes.append(
+                                    gr.Textbox(
+                                        label=f"({i + 1})",
+                                        visible=False
+                                    )
+                                )
+                        with gr.Row(visible=False) as check_btn_panel:
+                            score_listen_paragraph = gr.Markdown("")
+                            prev_listen_paragraph_btn = gr.Button("⬅ Previous")
+                            check_listen_paragraph_btn = gr.Button("Check", elem_id="custom_green_btn")
+                            next_listen_paragraph_btn = gr.Button("Next ➡")
+
+                    tab_listen.select(
+                        fn=lambda : lm.load_value_ratio_audio(AUDIO_PATH_FOLDER),
+                        outputs=[topic_dropdown]
+                    )
+
+                    topic_selected_btn.click(
+                        fn=lambda x: lm.transcribe_short_audio_text(
+                            model_whisper,
+                            nlp,
+                            AUDIO_PATH_FOLDER,
+                            x
+                        ),
+                        inputs=[topic_dropdown],
+                        outputs=[
+                            select_topic_panel,
+                            audio_content_panel,
+                            answer_paragraph_panel,
+                            check_btn_panel,
+                            transcript_text_paragraph,
+                            answers_state_listen_paragraph,
+                            user_answers_state,
+                            current_page,
+                            *answer_boxes,
+                            audio_listen_paragraph
+                        ]
+                    )
+
+                    next_listen_paragraph_btn.click(
+                        fn=lm.next_page,
+                        inputs=[
+                            current_page,
+                            answers_state_listen_paragraph,
+                            user_answers_state,
+                            *answer_boxes
+                        ],
+                        outputs=[
+                            current_page,
+                            user_answers_state,
+                            *answer_boxes
+                        ]
+                    )
+
+                    prev_listen_paragraph_btn.click(
+                        fn=lm.previous_page,
+                        inputs=[
+                            current_page,
+                            answers_state_listen_paragraph,
+                            user_answers_state,
+                            *answer_boxes
+                        ],
+                        outputs=[
+                            current_page,
+                            user_answers_state,
+                            *answer_boxes
+                        ]
+                    )
+
+                    check_listen_paragraph_btn.click(
+                        fn=lm.check_answer_listen_paragraph,
+                        inputs=[
+                            answers_state_listen_paragraph,
+                            user_answers_state,
+                            current_page,
+                            *answer_boxes
+                        ],
+                        outputs=[
+                            score_listen_paragraph,
+                            user_answers_state
+                        ]
+                    )
+
+
+
+
+                # with gr.Row():
+                #     with gr.Column(elem_id="video-wrap"):
+                #         gr.Markdown("# <center>Listening Test</center>")
+                #
+                #         video_player = gr.Video(label="Video Player", autoplay=True)
+                #         play_btn = gr.Button("Phát Video")
+                #
+                #         start_quiz_btn = gr.Button("🎧 Bắt đầu bài luyện nghe", variant="primary")
+                #
+                #         loading_display = gr.Markdown(value="", visible=False)
+                #
+                #         with gr.Group(visible=False, elem_classes="feedback-card") as question_group:
+                #             progress_display = gr.Markdown("Câu 1 / 3")
+                #             question_display = gr.Markdown("")
+                #             answer_input = gr.Textbox(
+                #                 label="Câu trả lời của bạn",
+                #                 lines=3,
+                #                 placeholder="Nhập câu trả lời của bạn..."
+                #             )
+                #             submit_answer_btn = gr.Button("Câu tiếp theo →", variant="primary")
+                #
+                #         with gr.Group(visible=False) as score_group:
+                #             gr.Markdown("### 📊 KẾT QUẢ BÀI LUYỆN NGHE")
+                #             score_display = gr.HTML()
+                #
+                # play_btn.click(
+                #     fn=lambda: lm.load_video(VIDEO_PATH),
+                #     outputs=video_player)
+                #
+                # start_quiz_btn.click(
+                #     fn=lambda: (
+                #         gr.update(interactive=False),
+                #         gr.update(visible=True,
+                #                   value="⏳ Đang xử lý audio và tạo câu hỏi, vui lòng chờ trong giây lát...")
+                #     ),
+                #     inputs=None,
+                #     outputs=[start_quiz_btn, loading_display]
+                # ).then(
+                #     fn=lambda: lm.start_listening_quiz(model_whisper, client, VIDEO_PATH),
+                #     inputs=None,
+                #     outputs=[
+                #         transcript_state, questions_state, current_index_state, answers_state,
+                #         start_quiz_btn, question_group, question_display, answer_input,
+                #         progress_display, score_group, score_display, submit_answer_btn
+                #     ]
+                # ).then(
+                #     fn=lambda: (gr.update(interactive=True), gr.update(visible=False, value="")),
+                #     inputs=None,
+                #     outputs=[start_quiz_btn, loading_display]
+                # )
+                #
+                # submit_answer_btn.click(
+                #     fn=lambda a1, b1, c1, d1, e1: lm.submit_listening_answer(client, a1, b1, c1, d1, e1),
+                #     inputs=[current_index_state, answer_input, transcript_state, questions_state, answers_state],
+                #     outputs=[
+                #         current_index_state, answers_state,
+                #         question_display, answer_input, progress_display,
+                #         question_group, score_group, score_display, submit_answer_btn
+                #     ]
+                # )
 
             # --- TAB 4: SPEAKING ---
             with gr.Column(visible=False) as view_speak:
@@ -465,9 +663,9 @@ with gr.Blocks() as demo:
                     )
 
                     add_fsrs_btn.click(
-                        fn=lambda w, c, m, p: rm.add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, w, c, m, p),
+                        fn=lambda w, c, m, p: rm.add_new_word_to_db_no_ui_update(DB_PATH, CEFR_DICT, lemmatizer, w, c, m, p),
                         inputs=[selected_word_txt, ceft_word, translated_word, phonetic_word],
-                        outputs=[*vocab_outputs, save_status_lbl],
+                        outputs=[*vocab_outputs, fsrs_buttons_row, save_status_lbl],
                         show_progress="hidden"
                     )
 
@@ -565,18 +763,41 @@ with gr.Blocks() as demo:
     )
     nav_vocab.click(lambda: "Vocabulary", None, current_tab).then(
         switch_tab, current_tab, [view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
+    ).then(
+        fn=lambda: vm.pipeline_load(DB_PATH),
+        inputs=None,
+        outputs=vocab_outputs,
+        show_progress="hidden"
     )
-    nav_listen.click(lambda: "Listening", None, current_tab).then(
-        switch_tab, current_tab, [view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
+    nav_ai.click(
+        lambda: switch_tab("AI Assistant"),
+        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
     )
-    nav_speak.click(lambda: "Speaking", None, current_tab).then(
-        switch_tab, current_tab, [view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
+
+    nav_vocab.click(
+        lambda: switch_tab("Vocabulary"),
+        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
+    ).then(
+        fn=lambda: vm.pipeline_load(DB_PATH),
+        inputs=None,
+        outputs=vocab_outputs,
+        show_progress="hidden"
     )
-    nav_read.click(lambda: "Reading", None, current_tab).then(
-        switch_tab, current_tab, [view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
+    nav_listen.click(
+        lambda: switch_tab("Listening"),
+        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
     )
-    nav_write.click(lambda: "Writing", None, current_tab).then(
-        switch_tab, current_tab, [view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
+    nav_speak.click(
+        lambda: switch_tab("Speaking"),
+        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
+    )
+    nav_read.click(
+        lambda: switch_tab("Reading"),
+        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
+    )
+    nav_write.click(
+        lambda: switch_tab("Writing"),
+        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
     )
 
 # ---------- ĐỌC CUSTOM CSS & JS ----------
@@ -598,4 +819,4 @@ else:
     custom_js_content = ""
     print(f"Cảnh báo: Không tìm thấy file {js_file_path}")
 
-demo.launch(css=custom_css_content, theme=gr.themes.Soft(), js=custom_js_content, allowed_paths=[project_root])
+demo.launch(css=custom_css_content, theme=gr.themes.Soft(), js=custom_js_content, allowed_paths=[project_root, r"E:\tmp\audio_cache"])

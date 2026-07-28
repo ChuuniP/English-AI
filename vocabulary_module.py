@@ -175,12 +175,13 @@ def render_stats_and_progress(t_due, t_vocab, comp, curr_idx, word, cefr, meanin
     </button>
     """
 
-    cefr_str = f"""
-    <div style='font-size: 18px; color: #2f73d8; font-weight: bold;'>Cefr: {cefr}</div>
-    <div style='font-size: 18px; color: #10b981; font-weight: bold; margin-top: 8px;'>Nghĩa: {meaning}</div>
-    {phonetic_html}
-    {pronounce_btn}
-    """
+    # cefr_str = f"""
+    # <div style='font-size: 18px; color: #2f73d8; font-weight: bold;'>Cefr: {cefr}</div>
+    # <div style='font-size: 18px; color: #10b981; font-weight: bold; margin-top: 8px;'>Nghĩa: {meaning}</div>
+    # {phonetic_html}
+    # {pronounce_btn}
+    # """
+    cefr_str = ""
 
     return (html_due, html_total, html_comp, f"<p style='text-align: right;'><b>{percent}%</b></p>", html_bar,
             idx_str, main_str, cefr_str, due_list)

@@ -1,5 +1,17 @@
 import json
 import gradio as gr
+import random
+import asyncio
+import nest_asyncio
+import edge_tts
+import os
+import pandas as pd
+import re
+from pathlib import Path
+import glob
+
+from listening_db import ListeningDB
+db = ListeningDB()
 
 def load_video(VIDEO_PATH):
     return VIDEO_PATH
@@ -25,7 +37,7 @@ Trả lời CHỈ bằng JSON, không thêm chữ nào khác, theo đúng format
   ]
 }}
 """
-    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    response = client.models.generate_content(model="gemini-2.5-flash-lite", contents=prompt)
     text = response.text.strip().replace("```json", "").replace("```", "").strip()
     return json.loads(text)["questions"]
 
@@ -169,3 +181,486 @@ def submit_listening_answer(client, current_index, answer_text, transcript, ques
         gr.update(value=score_html),
         gr.update(),
     )
+
+nest_asyncio.apply()
+
+async def _tts_async(text: str, output_path: str):
+    communicate = edge_tts.Communicate(text, voice="en-US-JennyNeural", rate="-10%")
+    await communicate.save(output_path)
+
+
+def generate_audio(text: str, output_path: str):
+    asyncio.run(_tts_async(text, output_path))
+    return output_path
+
+
+def get_random_words_by_level(cefr_dict: dict, level: str, count: int = 2) -> list:
+    """Lấy ngẫu nhiên N từ theo cấp độ CEFR."""
+    words = [
+        word for word, lvl in cefr_dict.items()
+        if str(lvl).strip().upper() == level.strip().upper()
+    ]
+    if len(words) < count:
+        # Nếu không đủ số từ trong dict thì lấy tất cả từ đang có
+        return words
+    return random.sample(words, count)
+
+
+def generate_sentences_with_gemini(client, words: list) -> list:
+    prompt = f"""
+    Bạn là một giáo viên tiếng Anh.
+    Với danh sách các từ sau: {json.dumps(words)}
+
+    Hãy tạo đúng {len(words)} câu tiếng Anh ngắn gọn, tự nhiên. Mỗi câu phải chứa đúng 1 từ tương ứng trong danh sách.
+
+    Trả về định dạng JSON duy nhất như sau, không kèm bất kỳ markdown nào khác:
+    [
+      {{"word": "từ_1", "full_sentence": "câu hoàn chỉnh chứa từ_1"}}
+    ]
+    """
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+
+    text = response.text.strip()
+
+    json_match = re.search(r'\[.*]', text, re.DOTALL)
+    if json_match:
+        return json.loads(json_match.group(0))
+
+    # Fallback nếu không tìm thấy cặp ngoặc vuông
+    clean_json = text.replace("```json", "").replace("```", "").strip()
+    return json.loads(clean_json)
+
+def get_or_generate_sentences(client, selected_words: list, cefr_level: str) -> list:
+    results = {}
+    words_to_generate = []
+
+    for word in selected_words:
+        record = db.get_word(word)
+
+        if record and record["examples"]:
+            results[word] = {
+                "word": word,
+                "full_sentence": random.choice(record["examples"])
+            }
+        else:
+            words_to_generate.append(word)   # sửa: append word (string), không phải item (dict)
+
+    if words_to_generate:
+        generated = generate_sentences_with_gemini(client, words_to_generate)
+
+        for g in generated:
+            results[g["word"]] = g
+            word_id = db.add_word(g["word"], cefr=cefr_level)
+            db.add_example(word_id, g["full_sentence"])
+
+    return [results[word] for word in selected_words if word in results]
+
+def get_ceft_word(CEFR_PATH):
+    df_cefr = pd.read_excel(CEFR_PATH, sheet_name="ALL")
+
+    columns_lower = [str(c).strip().lower() for c in df_cefr.columns]
+    word_col_index = columns_lower.index("headword") if "headword" in columns_lower else 0
+    level_col_index = columns_lower.index("cefr") if "cefr" in columns_lower else 1
+
+    real_word_col = df_cefr.columns[word_col_index]
+    real_level_col = df_cefr.columns[level_col_index]
+
+    cefr_dict = dict(zip(
+        df_cefr[real_word_col].astype(str).str.strip().str.lower(),
+        df_cefr[real_level_col].astype(str).str.strip()
+    ))
+    return cefr_dict
+
+def process_start_practice(client, cefr_dict_sample, cefr_level):
+    selected_words = get_random_words_by_level(cefr_dict_sample, cefr_level, count=2)
+    print(selected_words)
+    if not selected_words:
+        return (
+            gr.update(visible=True), gr.update(visible=False),
+            [], 0, 0, f"Không tìm thấy từ nào thuộc cấp độ {cefr_level}!",
+            "", "", None, "", "", gr.update(interactive=False)
+        )
+
+    try:
+        generated_data = get_or_generate_sentences(client, selected_words, cefr_level)
+    except Exception as e:
+        return (
+            gr.update(visible=True), gr.update(visible=False),
+            [], 0, 0, f"⚠️ Lỗi hệ thống: {str(e)}",
+            "", "", None, "", "", gr.update(interactive=True)
+        )
+
+    os.makedirs("/tmp/audio_cache", exist_ok=True)
+    parsed_questions = []
+
+    for idx, item in enumerate(generated_data):
+        target_word = item["word"]
+        full_sentence = item["full_sentence"]
+        blank_sentence = re.sub(rf"\b{re.escape(target_word)}\b", "______", full_sentence)
+        audio_file = f"/tmp/audio_cache/q_{idx}.mp3"
+        generate_audio(full_sentence, audio_file)
+
+        parsed_questions.append({
+            "word": target_word,
+            "display_sentence": blank_sentence,
+            "audio": audio_file
+        })
+
+    first_q = parsed_questions[0]
+    total = len(parsed_questions)
+
+    # ĐỦ 13 GIÁ TRỊ TRẢ VỀ:
+    return (
+        gr.update(visible=False),      # 1. setup_panel
+        gr.update(visible=True),       # 2. practice_panel
+        parsed_questions,              # 3. state_words_data
+        0,                             # 4. state_current_index
+        0,                             # 5. state_score
+        "",                            # 6. status_output (ĐÃ THÊM: làm sạch thông báo lỗi/trạng thái)
+        f"Câu 1/{total}",              # 7. progress_tracker
+        first_q["display_sentence"],   # 8. sentence_display
+        first_q["audio"],              # 9. audio_player
+        "",                            # 10. user_answer
+        "",                            # 11. feedback_display
+        gr.update(interactive=True),   # 12. btn_check
+    )
+
+
+def check_answer(user_input, current_index, words_data, score):
+    current_word = words_data[current_index]["word"].strip().lower()
+    user_word = (user_input or "").strip().lower()
+
+    if user_word == current_word:
+        result_msg = "✅ **Chính xác!**"
+        new_score = score + 1
+    else:
+        result_msg = f"❌ **Chưa đúng.** Đáp án đúng là: **{current_word}**"
+        new_score = score
+
+    is_last = (current_index == len(words_data) - 1)
+    next_label = "🎉 Hoàn thành" if is_last else "Câu tiếp theo ➡️"
+
+    return (
+        new_score,
+        result_msg,
+        gr.update(interactive=False),
+        gr.update(visible=True),
+        gr.update(value=next_label),
+    )
+
+
+def next_question(current_index, words_data, score):
+    next_idx = current_index + 1
+    total = len(words_data)
+    print(f"[DEBUG] current_index={current_index}, next_idx={next_idx}, total={total}")
+    if next_idx < total:
+        next_q = words_data[next_idx]
+        return (
+            next_idx,
+            f"Câu {next_idx + 1}/{total}",
+            next_q["display_sentence"],
+            next_q["audio"],
+            "",
+            "",
+            gr.update(interactive=True),
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.update(visible=False),
+            ""
+        )
+    else:
+        final_msg = f"🎉 **Hoàn thành bài luyện nghe!**\n\nKết quả: **{score}/{total}** câu đúng."
+        return (
+            next_idx,
+            "",
+            "",
+            gr.update(value=None),
+            "",
+            "",
+            gr.update(interactive=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=True),
+            final_msg
+        )
+
+def reset_to_start():
+    return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+
+def clear_transcript(AUDIO_PATH, transcript):
+    print(transcript)
+    print()
+    raw_name = Path(AUDIO_PATH).stem
+    formatted_name = raw_name.replace("_", " ").lower()
+    label_audio = formatted_name.title()
+
+    transcript = re.sub(r"dot\s+com", ".com", transcript, flags=re.IGNORECASE)
+
+    match = re.search(r'([^.!?]*\.com[^.!?]*[.!?])', transcript)
+
+    clean_transcript = transcript  # fallback nếu không tìm thấy .com
+    if match:
+        # Vị trí .com trong toàn bộ transcript
+        com_index_in_transcript = transcript.find('.com', match.start())
+
+        # Tìm dấu chấm đầu tiên SAU vị trí .com (bắt đầu tìm từ sau chữ 'm')
+        after_com = com_index_in_transcript + 4  # ngay sau ".com"
+        next_dot_index = transcript.find('.', after_com)
+
+        if next_dot_index != -1:
+            clean_transcript = transcript[next_dot_index + 1:].strip()
+        else:
+            clean_transcript = transcript[after_com:].strip()
+
+    print(clean_transcript)
+    print()
+
+    clean_transcript = clean_transcript[len(formatted_name) + 1:].strip()
+    print(clean_transcript)
+
+    return clean_transcript, label_audio
+
+def extract_important_token(nlp, transcript, max_blanks=30):
+    if not transcript.strip():
+        return "", []
+
+    doc = nlp(transcript)
+    selected_tokens = []
+    important_tokens = []
+    used_lemmas = set()
+
+    for token in doc:
+        if len(selected_tokens) >= max_blanks:
+            break
+
+        # Bỏ qua từ viết tắt/dấu nối (re, ve, ll, s, t, d...)
+        if "'" in token.text or "’" in token.text:
+            continue
+
+        # Chỉ lấy NOUN, VERB, ADJ, PROPN
+        if token.pos_ not in {"NOUN", "VERB", "ADJ", "PROPN"}:
+            continue
+
+        if token.is_stop or not token.is_alpha:
+            continue
+
+        lemma = token.lemma_.lower()
+        if lemma in used_lemmas:
+            continue
+
+        # Đảm bảo không lấy 2 từ nằm quá sát nhau (cách nhau dưới 2 ký tự) để tránh dính (19)(20)(21)
+        if selected_tokens and (token.idx - (selected_tokens[-1].idx + len(selected_tokens[-1].text)) < 3):
+            continue
+
+        used_lemmas.add(lemma)
+        selected_tokens.append(token)
+        important_tokens.append(token.text)
+
+    # Thay thế từ bằng chỗ trống
+    output = []
+    last = 0
+    for idx, token in enumerate(selected_tokens, start=1):
+        output.append(transcript[last:token.idx])
+        output.append(f" ({idx})＿＿＿ ")
+        last = token.idx + len(token.text)
+
+    output.append(transcript[last:])
+    blanked_text = "".join(output)
+
+    return blanked_text, important_tokens
+
+PAGE_SIZE = 4
+
+def transcribe_short_audio_text(whisper, nlp, AUDIO_PATH_FOLDER, mp3_name):
+    AUDIO_PATH = get_path_audio(AUDIO_PATH_FOLDER, mp3_name)
+
+    cached_transcript = db.get_mp3_transcript(mp3_name)
+
+    if cached_transcript:
+        raw_text = cached_transcript
+    else:
+        result = whisper.transcribe(AUDIO_PATH, fp16=False)
+        raw_text = result["text"].strip()
+        db.add_mp3_transcript(mp3_name, raw_text)
+
+    transcript, label_audio = clear_transcript(AUDIO_PATH, raw_text)
+    blank_text, answers = extract_important_token(nlp, transcript)
+
+    # Khởi tạo đáp án của người dùng
+    user_answers = [""] * len(answers)
+
+    return (
+        gr.update(visible=False),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        blank_text,
+        answers,
+        user_answers,
+        0,
+        *show_page(0, answers, user_answers),
+        gr.update(label=f"{label_audio}")
+    )
+
+def show_page(page, answers, user_answers):
+
+    start = page * PAGE_SIZE
+
+    updates = []
+
+    for i in range(PAGE_SIZE):
+
+        idx = start + i
+
+        if idx < len(answers):
+
+            updates.append(
+                gr.update(
+                    visible=True,
+                    label=f"({idx+1})",
+                    value=user_answers[idx]
+                )
+            )
+
+        else:
+
+            updates.append(
+                gr.update(
+                    visible=False,
+                    value=""
+                )
+            )
+
+    return updates
+
+def save_current_page(
+    page,
+    user_answers,
+    box1,
+    box2,
+    box3,
+    box4
+):
+
+    user_answers = user_answers.copy()
+
+    start = page * PAGE_SIZE
+
+    values = [box1, box2, box3, box4]
+
+    for i, value in enumerate(values):
+
+        idx = start + i
+
+        if idx < len(user_answers):
+            user_answers[idx] = value
+
+    return user_answers
+
+def next_page(
+    page,
+    answers,
+    user_answers,
+    box1,
+    box2,
+    box3,
+    box4
+):
+
+    user_answers = save_current_page(
+        page,
+        user_answers,
+        box1,
+        box2,
+        box3,
+        box4
+    )
+
+    max_page = (len(answers)-1)//PAGE_SIZE
+
+    page = min(page+1, max_page)
+
+    return (
+        page,
+        user_answers,
+        *show_page(page, answers, user_answers)
+    )
+
+def previous_page(
+    page,
+    answers,
+    user_answers,
+    box1,
+    box2,
+    box3,
+    box4
+):
+
+    user_answers = save_current_page(
+        page,
+        user_answers,
+        box1,
+        box2,
+        box3,
+        box4
+    )
+
+    page = max(page-1, 0)
+
+    return (
+        page,
+        user_answers,
+        *show_page(page, answers, user_answers)
+    )
+
+def check_answer_listen_paragraph(
+    correct_answers,
+    user_answers,
+    page,
+    box1,
+    box2,
+    box3,
+    box4
+):
+
+    user_answers = save_current_page(
+        page,
+        user_answers,
+        box1,
+        box2,
+        box3,
+        box4
+    )
+
+    score = 0
+
+    for gt, user in zip(correct_answers, user_answers):
+
+        if gt.lower().strip() == user.lower().strip():
+            score += 1
+
+    return (
+        f"{score}/{len(correct_answers)}",
+        user_answers
+    )
+
+def get_mp3_filename(folder_path):
+    if not os.path.exists(folder_path):
+        return []
+    mp3_paths = glob.glob(os.path.join(folder_path, "*.mp3"))
+    mp3_names = [os.path.basename(p) for p in mp3_paths]
+
+    return mp3_names
+
+def load_value_ratio_audio(folder_path):
+    mp3_names = get_mp3_filename(folder_path)
+    return gr.update(choices =  mp3_names, value = mp3_names[1])
+
+def get_path_audio(folder_path, mp3_name):
+    mp3_path = os.path.join(folder_path, mp3_name)
+    return mp3_path
+
+
