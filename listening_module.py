@@ -133,8 +133,23 @@ def start_listening_quiz(model_whisper, client, VIDEO_PATH):
             gr.update(value="Câu tiếp theo →"),  # submit_answer_btn
         )
 
-    transcript = lm_transcribe(model_whisper, VIDEO_PATH)
-    questions = lm_generate_questions(client, transcript)
+    video_name = os.path.basename(VIDEO_PATH)
+
+    # 1. Kiểm tra cache trong DB trước (theo tên file video)
+    cached_transcript = db.get_mp3_transcript(video_name)
+    cached_questions = db.get_mp3_questions(video_name) if cached_transcript else None
+
+    if cached_transcript and cached_questions:
+        # Đã có sẵn transcript + bộ câu hỏi -> load thẳng, không cần làm lại
+        transcript = cached_transcript
+        questions = cached_questions
+    else:
+        # 2. Chưa có (hoặc thiếu 1 phần) -> transcribe (nếu cần) + gọi Gemini sinh câu hỏi
+        transcript = cached_transcript or lm_transcribe(model_whisper, VIDEO_PATH)
+        questions = lm_generate_questions(client, transcript)
+
+        # 3. Lưu lại vào DB để lần sau dùng luôn, không phải làm lại
+        db.save_mp3_transcript_and_questions(video_name, transcript, questions)
 
     return (
         transcript, questions, 0, [],

@@ -28,7 +28,7 @@ import nltk
 from nltk.stem import WordNetLemmatizer
 import listening_module as lm
 import spacy
-from gtts import gTTS
+from functools import partial
 
 # ---------- KHAI BÁO PATH ----------
 TEMP_DIR = os.getenv("APP_TEMP_DIR", os.path.join(project_root, "temp"))
@@ -624,63 +624,63 @@ with gr.Blocks() as demo:
                             ]
                         )
 
+                    with gr.Tab("Practice"):
+                        with gr.Row():
+                            with gr.Column(scale=3):
+                                gr.HTML("🎙️ <b>Grocery Store</b>")
+                                conversation_history = gr.Chatbot(
+                                    label="Chat History",
+                                    elem_id="chat-bot",
+                                    height=450,
+                                    value=[{"role": "assistant", "content": initial_greeting}]
+                                )
+                                with gr.Row(elem_classes="audio-row"):
+                                    # Nút cảnh báo thiết lập scale=0, sử dụng class tip-btn để CSS ép size cứng 100px
+                                    gr.Button("❗", scale=0, min_width=100, elem_classes="tip-btn")
+                                    # Component Audio chiếm không gian co giãn tự do
+                                    audio_input = gr.Audio(
+                                        label="HOLD TO SPEAK",
+                                        sources=["microphone"],
+                                        type="filepath",
+                                        container=False,
+                                        scale=2,
+                                        elem_id="hide-dropdown-audio",
+                                        waveform_options=gr.WaveformOptions(show_recording_waveform=False)
+                                    )
+                                    # Cột trống scale=1 để dành khoảng trống cho Audio co giãn khi click
+                                    gr.Markdown("", scale=1)
 
-                # with gr.Row():
-                #     with gr.Column(scale=3):
-                #         gr.HTML("🎙️ <b>Grocery Store</b>")
-                #         conversation_history = gr.Chatbot(
-                #             label="Chat History",
-                #             elem_id="chat-bot",
-                #             height=450,
-                #             value=[{"role": "assistant", "content": initial_greeting}]
-                #         )
-                #         with gr.Row(elem_classes="audio-row"):
-                #             # Nút cảnh báo thiết lập scale=0, sử dụng class tip-btn để CSS ép size cứng 100px
-                #             gr.Button("❗", scale=0, min_width=100, elem_classes="tip-btn")
-                #             # Component Audio chiếm không gian co giãn tự do
-                #             audio_input = gr.Audio(
-                #                 label="HOLD TO SPEAK",
-                #                 sources=["microphone"],
-                #                 type="filepath",
-                #                 container=False,
-                #                 scale=2,
-                #                 elem_id="hide-dropdown-audio",
-                #                 waveform_options=gr.WaveformOptions(show_recording_waveform=False)
-                #             )
-                #             # Cột trống scale=1 để dành khoảng trống cho Audio co giãn khi click
-                #             gr.Markdown("", scale=1)
-                #
-                #     with gr.Column(scale=2):
-                #         gr.Markdown("#### Detailed Feedback")
-                #         with gr.Column(elem_classes="feedback-box"):
-                #             gr.HTML("🟢 <b>Pronunciation</b>")
-                #             feedback_output = gr.Markdown(
-                #                 value="*Chưa có dữ liệu hội thoại. Hãy nói điều gì đó!*"
-                #             )
-                #
-                #         with gr.Column(elem_classes="feedback-box"):
-                #             suggestions_output = gr.Markdown(
-                #                 value="*Các gợi ý nâng cao sẽ hiển thị tại đây.*"
-                #             )
-                #
-                # # Gọi hàm wrapper thay vì lambda
-                # voice_stream_handler = partial(
-                #     sm.handle_voice_stream,
-                #     client=client,
-                #     model_whisper=model_whisper,
-                #     wav2vec2_processor=wav2vec2_processor,
-                #     wav2vec2_model=wav2vec2_model,
-                #     device=device,
-                #     retriever=retriever,
-                #     chat_session=chat_session
-                # )
-                #
-                # # Gắn handler đã partial vào event Gradio
-                # audio_input.stop_recording(
-                #     fn=voice_stream_handler,
-                #     inputs=[audio_input, conversation_history],
-                #     outputs=[conversation_history, feedback_output, suggestions_output, audio_input]
-                # )
+                            with gr.Column(scale=2):
+                                gr.Markdown("#### Detailed Feedback")
+                                with gr.Column(elem_classes="feedback-box"):
+                                    gr.HTML("🟢 <b>Pronunciation</b>")
+                                    feedback_output = gr.Markdown(
+                                        value="*Chưa có dữ liệu hội thoại. Hãy nói điều gì đó!*"
+                                    )
+
+                                with gr.Column(elem_classes="feedback-box"):
+                                    suggestions_output = gr.Markdown(
+                                        value="*Các gợi ý nâng cao sẽ hiển thị tại đây.*"
+                                    )
+
+                        # Gọi hàm wrapper thay vì lambda
+                        voice_stream_handler = partial(
+                            sm.handle_voice_stream,
+                            client=client,
+                            model_whisper=model_whisper,
+                            wav2vec2_processor=wav2vec2_processor,
+                            wav2vec2_model=wav2vec2_model,
+                            device=device,
+                            retriever=retriever,
+                            chat_session=chat_session
+                        )
+
+                        # Gắn handler đã partial vào event Gradio
+                        audio_input.stop_recording(
+                            fn=voice_stream_handler,
+                            inputs=[audio_input, conversation_history],
+                            outputs=[conversation_history, feedback_output, suggestions_output, audio_input]
+                        )
 
             # --- TAB 5: READING ---
             cached_reading_text = gr.State(value="")

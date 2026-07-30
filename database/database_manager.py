@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import datetime
 
@@ -37,11 +38,12 @@ CREATE TABLE IF NOT EXISTS user_vocabulary (
     FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
 );
 
--- 4. Bảng lưu trữ transcript file nghe
+-- 4. Bảng lưu trữ transcript file nghe + bộ câu hỏi hiểu bài (Understanding tab)
 CREATE TABLE IF NOT EXISTS mp3_transcripts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mp3_name TEXT NOT NULL UNIQUE,
-    transcript TEXT
+    transcript TEXT,
+    questions_json TEXT
 );
 """
 
@@ -61,6 +63,16 @@ class DatabaseManager:
         """Khởi tạo toàn bộ cấu trúc bảng."""
         self.conn.executescript(SCHEMA)
         self.conn.commit()
+        self._migrate_schema()
+
+    def _migrate_schema(self):
+        """Bổ sung cột còn thiếu cho các DB đã tồn tại từ trước (an toàn khi chạy lại)."""
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA table_info(mp3_transcripts)")
+        existing_cols = {row["name"] for row in cur.fetchall()}
+        if "questions_json" not in existing_cols:
+            cur.execute("ALTER TABLE mp3_transcripts ADD COLUMN questions_json TEXT")
+            self.conn.commit()
 
     # --- QUẢN LÝ TỪ VỰNG & VÍ DỤ ---
 
@@ -328,6 +340,33 @@ class DatabaseManager:
         cur.execute("SELECT transcript FROM mp3_transcripts WHERE mp3_name = ?", (mp3_name,))
         row = cur.fetchone()
         return row["transcript"] if row else None
+
+    def get_mp3_questions(self, mp3_name: str) -> list | None:
+        """Truy xuất bộ câu hỏi (Understanding) đã lưu cho 1 file MP3/video, nếu có."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT questions_json FROM mp3_transcripts WHERE mp3_name = ?", (mp3_name,))
+        row = cur.fetchone()
+        if not row or not row["questions_json"]:
+            return None
+        try:
+            return json.loads(row["questions_json"])
+        except (TypeError, ValueError):
+            return None
+
+    def save_mp3_transcript_and_questions(self, mp3_name: str, transcript: str, questions: list) -> int:
+        """Lưu (hoặc ghi đè) transcript + bộ câu hỏi cho 1 file MP3/video trong 1 lần ghi."""
+        questions_json = json.dumps(questions, ensure_ascii=False)
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO mp3_transcripts (mp3_name, transcript, questions_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(mp3_name) DO UPDATE SET
+                transcript = excluded.transcript,
+                questions_json = excluded.questions_json
+        """, (mp3_name, transcript, questions_json))
+        self.conn.commit()
+        cur.execute("SELECT id FROM mp3_transcripts WHERE mp3_name = ?", (mp3_name,))
+        return cur.fetchone()["id"]
 
     def close(self):
         """Đóng kết nối cơ sở dữ liệu."""
