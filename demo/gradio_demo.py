@@ -28,6 +28,7 @@ import nltk
 from nltk.stem import WordNetLemmatizer
 import listening_module as lm
 import spacy
+from gtts import gTTS
 
 # ---------- KHAI BÁO PATH ----------
 TEMP_DIR = os.getenv("APP_TEMP_DIR", os.path.join(project_root, "temp"))
@@ -45,10 +46,12 @@ os.environ["HF_HOME"] = HF_CACHE_DIR
 
 _ = load_dotenv()
 
+# --------- KHAI BÁO DATABASE -----------
+from database.database_manager import DatabaseManager
+db = DatabaseManager()
+
 # ---------- KHAI BÁO VOCABULARY ----------
-DB_PATH = "user_study_data.db"
 fsrs_app = Scheduler()
-vm.init_database(DB_PATH)
 
 # ---------- KHAI BÁO LISTENING ----------
 VIDEO_PATH = os.path.join(project_root, "datasets", "Videos", "The_benefits_of_doing_nothing.mp4")
@@ -70,11 +73,11 @@ device = "cpu"
 model_whisper = whisper.load_model(MODEL_SIZE, device=device)
 
 model_id = "facebook/wav2vec2-base-960h"
-# wav2vec2_processor = Wav2Vec2Processor.from_pretrained(model_id)
-# wav2vec2_model = Wav2Vec2ForCTC.from_pretrained(model_id).to(device)
+wav2vec2_processor = Wav2Vec2Processor.from_pretrained(model_id)
+wav2vec2_model = Wav2Vec2ForCTC.from_pretrained(model_id).to(device)
 
-wav2vec2_processor = ""
-wav2vec2_model = ""
+# wav2vec2_processor = ""
+# wav2vec2_model = ""
 
 api_key = os.getenv("GEMINI_API_KEY")
 client = None
@@ -91,8 +94,8 @@ initial_greeting = "Hello! Welcome to our store. What would you like to buy toda
 chat_session.add_message("assistant", initial_greeting)
 
 model_name="all-MiniLM-L6-v2"
-# retriever = sm.rag_with_faiss(model_name, storage_database)
-retriever = ""
+retriever = sm.rag_with_faiss(model_name, storage_database)
+# retriever = ""
 
 # ---------- KHAI BÁO READING ----------
 translator = GoogleTranslator(source="en", target="vi")
@@ -155,7 +158,6 @@ ESSAY_MODEL_WEIGHTS_PATH = r"E:\Đồ án môn học\Demo Speaking Module\models
 essay_scoring_tokenizer, essay_scoring_model = "", ""
 # ---------- GIAO DIỆN ----------
 with gr.Blocks() as demo:
-    current_tab = gr.State("AI Assistant")
 
     with gr.Row():
         # --- SIDEBAR ---
@@ -239,25 +241,25 @@ with gr.Blocks() as demo:
                 for btn, rating_name in [(btn_again, "Again"), (btn_hard, "Hard"), (btn_good, "Good"),
                                          (btn_easy, "Easy")]:
                     btn.click(
-                        fn=lambda s, r=rating_name: vm.review_word_action(DB_PATH, fsrs_app, r, s),
+                        fn=lambda s, r=rating_name: vm.review_word_action(fsrs_app, r, s),
                         inputs=[due_list_state],
                         outputs=vocab_outputs,
                         show_progress="hidden"
                     ).then(
-                        fn=lambda: gr.update(visible=False),
+                        fn=lambda: (gr.update(visible=False), gr.update(visible=False)),
                         inputs=None,
-                        outputs=fsrs_buttons_row
+                        outputs=[fsrs_buttons_row, area_answer]
                     )
 
                 btn_refresh.click(
-                    fn=lambda: vm.pipeline_load(DB_PATH),
+                    fn=lambda: vm.pipeline_load(),
                     inputs=None,
                     outputs=vocab_outputs,
                     show_progress="hidden"
                 )
 
                 demo.load(
-                    fn=lambda: vm.pipeline_load(DB_PATH),
+                    fn=lambda: vm.pipeline_load(),
                     inputs=None,
                     outputs=vocab_outputs,
                     show_progress="hidden"
@@ -313,7 +315,7 @@ with gr.Blocks() as demo:
                             btn_restart = gr.Button("🔄 Luyện tập lượt mới", variant="secondary")
 
                     btn_start.click(
-                        fn=lambda level: lm.process_start_practice(client, cefr_dict_sample, level),
+                        fn=lambda level: lm.process_start_practice(client, cefr_dict_sample, level, translator, lemmatizer),
                         inputs=[ceft_level],
                         outputs=[
                             setup_panel,
@@ -362,7 +364,7 @@ with gr.Blocks() as demo:
                         with gr.Column(elem_classes=["bordered-row-column"], visible=False) as audio_content_panel:
                             audio_listen_paragraph = gr.Audio(
                                 label="Phát âm thanh câu",
-                                value=AUDIO_PATH,
+                                # value=AUDIO_PATH,
                                 interactive=False,
                             )
                             transcript_text_paragraph = gr.Markdown("")
@@ -460,110 +462,225 @@ with gr.Blocks() as demo:
                             user_answers_state
                         ]
                     )
+                    with gr.Tab("Understanding"):
+                        with gr.Row():
+                            with gr.Column(elem_id="video-wrap"):
+                                gr.Markdown("# <center>Listening Test</center>")
 
+                                video_player = gr.Video(label="Video Player", autoplay=True)
+                                play_btn = gr.Button("Phát Video")
 
+                                start_quiz_btn = gr.Button("🎧 Bắt đầu bài luyện nghe", variant="primary")
 
+                                loading_display = gr.Markdown(value="", visible=False)
 
-                # with gr.Row():
-                #     with gr.Column(elem_id="video-wrap"):
-                #         gr.Markdown("# <center>Listening Test</center>")
-                #
-                #         video_player = gr.Video(label="Video Player", autoplay=True)
-                #         play_btn = gr.Button("Phát Video")
-                #
-                #         start_quiz_btn = gr.Button("🎧 Bắt đầu bài luyện nghe", variant="primary")
-                #
-                #         loading_display = gr.Markdown(value="", visible=False)
-                #
-                #         with gr.Group(visible=False, elem_classes="feedback-card") as question_group:
-                #             progress_display = gr.Markdown("Câu 1 / 3")
-                #             question_display = gr.Markdown("")
-                #             answer_input = gr.Textbox(
-                #                 label="Câu trả lời của bạn",
-                #                 lines=3,
-                #                 placeholder="Nhập câu trả lời của bạn..."
-                #             )
-                #             submit_answer_btn = gr.Button("Câu tiếp theo →", variant="primary")
-                #
-                #         with gr.Group(visible=False) as score_group:
-                #             gr.Markdown("### 📊 KẾT QUẢ BÀI LUYỆN NGHE")
-                #             score_display = gr.HTML()
-                #
-                # play_btn.click(
-                #     fn=lambda: lm.load_video(VIDEO_PATH),
-                #     outputs=video_player)
-                #
-                # start_quiz_btn.click(
-                #     fn=lambda: (
-                #         gr.update(interactive=False),
-                #         gr.update(visible=True,
-                #                   value="⏳ Đang xử lý audio và tạo câu hỏi, vui lòng chờ trong giây lát...")
-                #     ),
-                #     inputs=None,
-                #     outputs=[start_quiz_btn, loading_display]
-                # ).then(
-                #     fn=lambda: lm.start_listening_quiz(model_whisper, client, VIDEO_PATH),
-                #     inputs=None,
-                #     outputs=[
-                #         transcript_state, questions_state, current_index_state, answers_state,
-                #         start_quiz_btn, question_group, question_display, answer_input,
-                #         progress_display, score_group, score_display, submit_answer_btn
-                #     ]
-                # ).then(
-                #     fn=lambda: (gr.update(interactive=True), gr.update(visible=False, value="")),
-                #     inputs=None,
-                #     outputs=[start_quiz_btn, loading_display]
-                # )
-                #
-                # submit_answer_btn.click(
-                #     fn=lambda a1, b1, c1, d1, e1: lm.submit_listening_answer(client, a1, b1, c1, d1, e1),
-                #     inputs=[current_index_state, answer_input, transcript_state, questions_state, answers_state],
-                #     outputs=[
-                #         current_index_state, answers_state,
-                #         question_display, answer_input, progress_display,
-                #         question_group, score_group, score_display, submit_answer_btn
-                #     ]
-                # )
+                                with gr.Group(visible=False, elem_classes="feedback-card") as question_group:
+                                    progress_display = gr.Markdown("Câu 1 / 3")
+                                    question_display = gr.Markdown("")
+                                    answer_input = gr.Textbox(
+                                        label="Câu trả lời của bạn",
+                                        lines=3,
+                                        placeholder="Nhập câu trả lời của bạn..."
+                                    )
+                                    submit_answer_btn = gr.Button("Câu tiếp theo →", variant="primary")
+
+                                with gr.Group(visible=False) as score_group:
+                                    gr.Markdown("### 📊 KẾT QUẢ BÀI LUYỆN NGHE")
+                                    score_display = gr.HTML()
+
+                        play_btn.click(
+                            fn=lambda: lm.load_video(VIDEO_PATH),
+                            outputs=video_player)
+
+                        start_quiz_btn.click(
+                            fn=lambda: (
+                                gr.update(interactive=False),
+                                gr.update(visible=True,
+                                          value="⏳ Đang xử lý audio và tạo câu hỏi, vui lòng chờ trong giây lát...")
+                            ),
+                            inputs=None,
+                            outputs=[start_quiz_btn, loading_display]
+                        ).then(
+                            fn=lambda: lm.start_listening_quiz(model_whisper, client, VIDEO_PATH),
+                            inputs=None,
+                            outputs=[
+                                transcript_state, questions_state, current_index_state, answers_state,
+                                start_quiz_btn, question_group, question_display, answer_input,
+                                progress_display, score_group, score_display, submit_answer_btn
+                            ]
+                        ).then(
+                            fn=lambda: (gr.update(interactive=True), gr.update(visible=False, value="")),
+                            inputs=None,
+                            outputs=[start_quiz_btn, loading_display]
+                        )
+
+                        submit_answer_btn.click(
+                            fn=lambda a1, b1, c1, d1, e1: lm.submit_listening_answer(client, a1, b1, c1, d1, e1),
+                            inputs=[current_index_state, answer_input, transcript_state, questions_state, answers_state],
+                            outputs=[
+                                current_index_state, answers_state,
+                                question_display, answer_input, progress_display,
+                                question_group, score_group, score_display, submit_answer_btn
+                            ]
+                        )
 
             # --- TAB 4: SPEAKING ---
             with gr.Column(visible=False) as view_speak:
-                with gr.Row():
-                    with gr.Column(scale=3):
-                        gr.HTML("🎙️ <b>Grocery Store</b>")
-                        conversation_history = gr.Chatbot(
-                            label="Chat History",
-                            elem_id="chat-bot",
-                            height=450,
-                            value=[{"role": "assistant", "content": initial_greeting}]
+                speaking_words_state = gr.State([])
+                speaking_current_idx_state = gr.State(0)
+
+                with gr.Tabs():
+                    with gr.Tab("IPA"):
+                        with gr.Row() as btn_speaking_panel:
+                            random_word_btn = gr.Button("Choose Randomly")
+                            fsrs_word_btn = gr.Button("Choose From FSRS")
+
+                        with gr.Column(visible=False) as ipa_word_speaking_panel:
+                            with gr.Row():
+                                gr.Markdown(scale=1)
+                                content_word_ipa_panel = gr.Markdown("Something inside but i don't know what it is",
+                                                                     scale=4)
+                                gr.Markdown(scale=1)
+
+                            gr.HTML("<style>#hidden-audio-recorder{display:none !important;}</style>")
+                            audio_recorder = gr.File(
+                                visible=True,
+                                elem_id="hidden-audio-recorder",
+                                type="filepath"
+                            )
+                            play_word_speaking_btn = gr.Button("🔊", variant="secondary", size="sm", elem_id="play-audio-btn")
+                            with gr.Row():
+                                audio_player = gr.Audio(autoplay=True, visible=True, elem_id="hidden-audio-player")
+                                gr.HTML("<style>#hidden-audio-player{display:none !important;}</style>")
+
+                            # --- BỘ NÚT ĐIỀU HƯỚNG VÀ RECORD TINH GỌN ---
+                            with gr.Row(elem_classes=["align-center-row"]):
+                                pre_ipa_speaking_btn = gr.Button("Previous", interactive=False, scale=1)
+
+                                record_html = gr.HTML("""
+                                <div style="display:flex;justify-content:center;">
+                                    <button id="record-btn" class="record-btn">
+                                        🎤 Record
+                                    </button>
+                                </div>
+                                """)
+
+                                next_ipa_speaking_btn = gr.Button("Next", interactive=False, scale=1)
+
+                        # 1. Bấm lấy từ ngẫu nhiên
+                        random_word_btn.click(
+                            fn=lambda: sm.process_random_speaking_words(db),
+                            inputs=[],
+                            outputs=[
+                                content_word_ipa_panel,
+                                ipa_word_speaking_panel,
+                                speaking_words_state,
+                                speaking_current_idx_state,
+                                pre_ipa_speaking_btn,
+                                next_ipa_speaking_btn
+                            ]
                         )
-                        with gr.Row(elem_classes="audio-row"):
-                            # Nút cảnh báo thiết lập scale=0, sử dụng class tip-btn để CSS ép size cứng 100px
-                            gr.Button("❗", scale=0, min_width=100, elem_classes="tip-btn")
-                            # Component Audio chiếm không gian co giãn tự do
-                            audio_input = gr.Audio(
-                                label="HOLD TO SPEAK",
-                                sources=["microphone"],
-                                type="filepath",
-                                container=False,
-                                scale=2,
-                                elem_id="hide-dropdown-audio",
-                                waveform_options=gr.WaveformOptions(show_recording_waveform=False)
-                            )
-                            # Cột trống scale=1 để dành khoảng trống cho Audio co giãn khi click
-                            gr.Markdown("", scale=1)
+                        play_word_speaking_btn.click(
+                            fn=sm.speak_text,
+                            inputs=[content_word_ipa_panel],
+                            outputs=[audio_player]
+                        )
 
-                    with gr.Column(scale=2):
-                        gr.Markdown("#### Detailed Feedback")
-                        with gr.Column(elem_classes="feedback-box"):
-                            gr.HTML("🟢 <b>Pronunciation</b>")
-                            feedback_output = gr.Markdown(
-                                value="*Chưa có dữ liệu hội thoại. Hãy nói điều gì đó!*"
-                            )
 
-                        with gr.Column(elem_classes="feedback-box"):
-                            suggestions_output = gr.Markdown(
-                                value="*Các gợi ý nâng cao sẽ hiển thị tại đây.*"
-                            )
+                        # 2. Xử lý khi thay đổi dữ liệu audio (sau khi ghi âm hoàn tất)
+                        # Chỉ để log/trích xuất phoneme, không ảnh hưởng tới nút Next/Previous.
+                        audio_recorder.change(
+                            fn=lambda x, y, r, s: sm.handle_record_action(wav2vec2_processor, wav2vec2_model, device, x, y, r, s),
+                            inputs=[
+                                audio_recorder,
+                                speaking_current_idx_state,
+                                speaking_words_state,
+                                content_word_ipa_panel
+                            ],
+                            outputs=[content_word_ipa_panel, audio_recorder]
+                        )
+
+                        # 3. Bấm Next
+                        next_ipa_speaking_btn.click(
+                            fn=lambda idx, words: sm.navigate_word(1, idx, words),
+                            inputs=[speaking_current_idx_state, speaking_words_state],
+                            outputs=[
+                                content_word_ipa_panel,
+                                speaking_current_idx_state,
+                                pre_ipa_speaking_btn,
+                                next_ipa_speaking_btn
+                            ]
+                        )
+
+                        # 4. Bấm Previous
+                        pre_ipa_speaking_btn.click(
+                            fn=lambda idx, words: sm.navigate_word(-1, idx, words),
+                            inputs=[speaking_current_idx_state, speaking_words_state],
+                            outputs=[
+                                content_word_ipa_panel,
+                                speaking_current_idx_state,
+                                pre_ipa_speaking_btn,
+                                next_ipa_speaking_btn
+                            ]
+                        )
+
+
+                # with gr.Row():
+                #     with gr.Column(scale=3):
+                #         gr.HTML("🎙️ <b>Grocery Store</b>")
+                #         conversation_history = gr.Chatbot(
+                #             label="Chat History",
+                #             elem_id="chat-bot",
+                #             height=450,
+                #             value=[{"role": "assistant", "content": initial_greeting}]
+                #         )
+                #         with gr.Row(elem_classes="audio-row"):
+                #             # Nút cảnh báo thiết lập scale=0, sử dụng class tip-btn để CSS ép size cứng 100px
+                #             gr.Button("❗", scale=0, min_width=100, elem_classes="tip-btn")
+                #             # Component Audio chiếm không gian co giãn tự do
+                #             audio_input = gr.Audio(
+                #                 label="HOLD TO SPEAK",
+                #                 sources=["microphone"],
+                #                 type="filepath",
+                #                 container=False,
+                #                 scale=2,
+                #                 elem_id="hide-dropdown-audio",
+                #                 waveform_options=gr.WaveformOptions(show_recording_waveform=False)
+                #             )
+                #             # Cột trống scale=1 để dành khoảng trống cho Audio co giãn khi click
+                #             gr.Markdown("", scale=1)
+                #
+                #     with gr.Column(scale=2):
+                #         gr.Markdown("#### Detailed Feedback")
+                #         with gr.Column(elem_classes="feedback-box"):
+                #             gr.HTML("🟢 <b>Pronunciation</b>")
+                #             feedback_output = gr.Markdown(
+                #                 value="*Chưa có dữ liệu hội thoại. Hãy nói điều gì đó!*"
+                #             )
+                #
+                #         with gr.Column(elem_classes="feedback-box"):
+                #             suggestions_output = gr.Markdown(
+                #                 value="*Các gợi ý nâng cao sẽ hiển thị tại đây.*"
+                #             )
+                #
+                # # Gọi hàm wrapper thay vì lambda
+                # voice_stream_handler = partial(
+                #     sm.handle_voice_stream,
+                #     client=client,
+                #     model_whisper=model_whisper,
+                #     wav2vec2_processor=wav2vec2_processor,
+                #     wav2vec2_model=wav2vec2_model,
+                #     device=device,
+                #     retriever=retriever,
+                #     chat_session=chat_session
+                # )
+                #
+                # # Gắn handler đã partial vào event Gradio
+                # audio_input.stop_recording(
+                #     fn=voice_stream_handler,
+                #     inputs=[audio_input, conversation_history],
+                #     outputs=[conversation_history, feedback_output, suggestions_output, audio_input]
+                # )
 
             # --- TAB 5: READING ---
             cached_reading_text = gr.State(value="")
@@ -663,7 +780,7 @@ with gr.Blocks() as demo:
                     )
 
                     add_fsrs_btn.click(
-                        fn=lambda w, c, m, p: rm.add_new_word_to_db_no_ui_update(DB_PATH, CEFR_DICT, lemmatizer, w, c, m, p),
+                        fn=lambda w, c, m, p: rm.add_new_word_to_db_no_ui_update(CEFR_DICT, lemmatizer, w, c, m, p),
                         inputs=[selected_word_txt, ceft_word, translated_word, phonetic_word],
                         outputs=[*vocab_outputs, fsrs_buttons_row, save_status_lbl],
                         show_progress="hidden"
@@ -747,58 +864,44 @@ with gr.Blocks() as demo:
                              score_phraseology, score_grammar, score_conventions, essay_feedback_display]
                 )
 
-    # --- ĐIỀU HƯỚNG TAB (Đã sửa đổi để thêm Tab Listening đầy đủ) ---
+    # --- ĐIỀU HƯỚNG TAB ---
+    # Mỗi tab gồm: (view tương ứng, nút sidebar tương ứng)
+    NAV_TABS = {
+        "AI Assistant": (view_ai, nav_ai),
+        "Vocabulary": (view_vocab, nav_vocab),
+        "Listening": (view_listen, nav_listen),
+        "Speaking": (view_speak, nav_speak),
+        "Reading": (view_read, nav_read),
+        "Writing": (view_write, nav_write),
+    }
+
     def switch_tab(tab_name):
-        return {
-            view_ai: gr.update(visible=(tab_name == "AI Assistant")),
-            view_vocab: gr.update(visible=(tab_name == "Vocabulary")),
-            view_listen: gr.update(visible=(tab_name == "Listening")),
-            view_speak: gr.update(visible=(tab_name == "Speaking")),
-            view_read: gr.update(visible=(tab_name == "Reading")),
-            view_write: gr.update(visible=(tab_name == "Writing")),
-        }
+        """Bật view tương ứng + tô màu active cho đúng nút sidebar đang chọn."""
+        updates = {}
+        for name, (view, btn) in NAV_TABS.items():
+            is_active = (name == tab_name)
+            updates[view] = gr.update(visible=is_active)
+            updates[btn] = gr.update(
+                elem_classes=["sidebar-btn", "sidebar-active-btn"] if is_active else ["sidebar-btn"]
+            )
+        return updates
 
-    nav_ai.click(lambda: "AI Assistant", None, current_tab).then(
-        switch_tab, current_tab, [view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
-    )
-    nav_vocab.click(lambda: "Vocabulary", None, current_tab).then(
-        switch_tab, current_tab, [view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
-    ).then(
-        fn=lambda: vm.pipeline_load(DB_PATH),
+    # Output chung cho mọi nút nav: tất cả view + tất cả nút sidebar
+    nav_tab_outputs = [view for view, _ in NAV_TABS.values()] + [btn for _, btn in NAV_TABS.values()]
+
+    nav_ai.click(lambda: switch_tab("AI Assistant"), outputs=nav_tab_outputs)
+
+    nav_vocab.click(lambda: switch_tab("Vocabulary"), outputs=nav_tab_outputs).then(
+        fn=lambda: vm.pipeline_load(),
         inputs=None,
         outputs=vocab_outputs,
         show_progress="hidden"
     )
-    nav_ai.click(
-        lambda: switch_tab("AI Assistant"),
-        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
-    )
 
-    nav_vocab.click(
-        lambda: switch_tab("Vocabulary"),
-        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
-    ).then(
-        fn=lambda: vm.pipeline_load(DB_PATH),
-        inputs=None,
-        outputs=vocab_outputs,
-        show_progress="hidden"
-    )
-    nav_listen.click(
-        lambda: switch_tab("Listening"),
-        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
-    )
-    nav_speak.click(
-        lambda: switch_tab("Speaking"),
-        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
-    )
-    nav_read.click(
-        lambda: switch_tab("Reading"),
-        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
-    )
-    nav_write.click(
-        lambda: switch_tab("Writing"),
-        outputs=[view_ai, view_vocab, view_listen, view_speak, view_read, view_write]
-    )
+    nav_listen.click(lambda: switch_tab("Listening"), outputs=nav_tab_outputs)
+    nav_speak.click(lambda: switch_tab("Speaking"), outputs=nav_tab_outputs)
+    nav_read.click(lambda: switch_tab("Reading"), outputs=nav_tab_outputs)
+    nav_write.click(lambda: switch_tab("Writing"), outputs=nav_tab_outputs)
 
 # ---------- ĐỌC CUSTOM CSS & JS ----------
 current_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in locals() else os.getcwd()
@@ -819,4 +922,5 @@ else:
     custom_js_content = ""
     print(f"Cảnh báo: Không tìm thấy file {js_file_path}")
 
+demo.queue(default_concurrency_limit=1, max_size=20)
 demo.launch(css=custom_css_content, theme=gr.themes.Soft(), js=custom_js_content, allowed_paths=[project_root, r"E:\tmp\audio_cache"])

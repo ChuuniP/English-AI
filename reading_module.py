@@ -1,20 +1,18 @@
 import ast
-import gradio as gr
-import time
-from nltk.corpus import wordnet
-import sqlite3
 import datetime
+import gradio as gr
 from fsrs import Card
 
-from vocabulary_module import pipeline_load
+from vocabulary_module import (
+    pipeline_load,
+    process_vocabulary_info,
+    get_base_word,
+    get_word_phonetic
+)
+# Import DatabaseManager chuẩn theo cấu trúc dự án
+from database.database_manager import DatabaseManager
 
-try:
-    import eng_to_ipa as ipa
-    _IPA_AVAILABLE = True
-except ImportError:
-    ipa = None
-    _IPA_AVAILABLE = False
-    print("⚠️ Chưa cài đặt thư viện 'eng_to_ipa'. Chạy: pip install eng_to_ipa để bật tính năng phiên âm IPA.")
+db = DatabaseManager()
 
 
 def render_html_reading_zone(text_content, font_family, font_size, bg_color, text_color):
@@ -41,10 +39,8 @@ def render_html_reading_zone(text_content, font_family, font_size, bg_color, tex
     real_bg = bg_map.get(bg_color, "#FAF8F3")
     real_text = text_map.get(text_color, "#1B2A45")
 
-    # Tạo ID ngẫu nhiên hoặc cố định để khoanh vùng CSS, tránh bị file style.css đè
     custom_zone_id = "reading-zone-active"
 
-    # Định nghĩa thẻ style động - Đây là chìa khóa để ép màu chữ hoạt động
     dynamic_css = f"""
     <style>
         #{custom_zone_id} {{
@@ -70,7 +66,6 @@ def render_html_reading_zone(text_content, font_family, font_size, bg_color, tex
     </style>
     """
 
-    # Nếu không có text, trả về khung trống chuẩn style đã chọn
     if not text_content or not text_content.strip():
         default_html = f"""
         {dynamic_css}
@@ -87,7 +82,6 @@ def render_html_reading_zone(text_content, font_family, font_size, bg_color, tex
         if clean_p:
             html_body += f"<p>{clean_p}</p>"
 
-    # Kết hợp mã CSS động bọc ngoài vùng hiển thị văn bản
     full_html = f"""
     {dynamic_css}
     <div id="{custom_zone_id}">
@@ -96,6 +90,7 @@ def render_html_reading_zone(text_content, font_family, font_size, bg_color, tex
     """
 
     return gr.update(value=full_html)
+
 
 def handle_file_upload(file_obj, font_family, font_size, bg_color, text_color):
     """Hàm xử lý khi người dùng upload file mới"""
@@ -128,78 +123,15 @@ def handle_file_upload(file_obj, font_family, font_size, bg_color, text_color):
         return "", gr.update(value=error_html)
 
 
-def get_phonetic_ipa(word):
-    """Trả về phiên âm IPA của một từ tiếng Anh, dùng thư viện eng_to_ipa (offline).
-    Trả về chuỗi rỗng nếu không tra được hoặc thư viện chưa được cài đặt."""
-    if not word or not str(word).strip():
-        return ""
-
-    clean_word = str(word).strip().strip(".,!?\"'()[]{}*:;").lower()
-    if not clean_word:
-        return ""
-
-    if not _IPA_AVAILABLE:
-        return ""
-
-    try:
-        result = ipa.convert(clean_word)
-        # eng_to_ipa bọc từ không tra được trong dấu * (vd: "*unknownword*")
-        if not result or result.strip("*") == clean_word:
-            return ""
-        return result.strip()
-    except Exception:
-        return ""
-
-def get_base_word(lemmatizer, word):
-    clean_word = word.strip().strip(".,!?\"'()[]{}*:;").lower()
-    if not clean_word:
-        return ""
-
-    base_v = lemmatizer.lemmatize(clean_word, pos=wordnet.VERB)
-    if base_v != clean_word:
-        return base_v
-
-    base_n = lemmatizer.lemmatize(clean_word, pos=wordnet.NOUN)
-    return base_n
-
-
-def translate_and_get_cefr_with_excel(CEFR_DICT, translator, lemmatizer, words, max_retries=3, delay=0.5):
-    # Luôn trả về 3 giá trị: nghĩa, cấp độ CEFR, phiên âm IPA
+def translate_and_get_cefr_with_excel(CEFR_DICT, translator, lemmatizer, words):
+    """Ủy quyền toàn bộ xử lý dịch/CEFR/Phonetic sang vocabulary_module."""
     if not words or not str(words).strip():
         return "", "N/A", ""
 
-    word_str = str(words).strip()
-    meaning = word_str
-
-    for attempt in range(max_retries):
-        try:
-            meaning = translator.translate(word_str)
-            if meaning and meaning.strip():  # Kiểm tra nếu kết quả trả về hợp lệ
-                break
-        except Exception as e:
-            if attempt == max_retries - 1:
-                print(f"Lỗi dịch sau {max_retries} lần thử: {e}")
-                meaning = f"[Lỗi dịch] {word_str}"
-            else:
-                time.sleep(delay)
-
-    word_to_check = word_str.split()[0] if " " in word_str else word_str
-    base_word = get_base_word(lemmatizer, word_to_check)
-
-    cefr_level = "N/A"
-    if CEFR_DICT:
-        cefr_level = CEFR_DICT.get(base_word.strip().lower(), "N/A")
-        if cefr_level == "N/A":
-            clean_word = word_to_check.strip().strip(".,!?\"'()[]{}*:;").lower()
-            cefr_level = CEFR_DICT.get(clean_word, "N/A")
-
-    phonetic_ipa = get_phonetic_ipa(base_word if base_word else word_to_check)
-
-    return meaning.strip(), cefr_level.strip(), phonetic_ipa
+    return process_vocabulary_info(CEFR_DICT, translator, lemmatizer, words)
 
 
-def add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, word, cefr_j, meaning, phonetic=""):
-    # Đảm bảo số lượng update rỗng tương ứng với 12 thành phần của vocab_outputs
+def add_new_word_to_db(CEFR_DICT, lemmatizer, word, cefr_j, meaning, phonetic=""):
     error_vocab_updates = tuple([gr.update()] * 12)
 
     if not word or not str(word).strip():
@@ -211,140 +143,100 @@ def add_new_word_to_db(DB_PATH, CEFR_DICT, lemmatizer, word, cefr_j, meaning, ph
 
     clean_word = lemma_word.capitalize() if word.strip()[0].isupper() else lemma_word
 
-    clean_meaning = str(meaning).strip() if meaning else ""
+    clean_meaning = str(meaning).strip() if meaning else "Chưa rõ nghĩa"
     clean_cefr = str(cefr_j).strip() if cefr_j else "N/A"
 
-    if not clean_meaning:
-        clean_meaning = "Chưa rõ nghĩa"
-
-    if not clean_cefr or clean_cefr == "":
+    if not clean_cefr:
         clean_cefr = "N/A"
 
-    clean_phonetic = str(phonetic).strip() if phonetic else ""
-    if not clean_phonetic:
-        clean_phonetic = get_phonetic_ipa(clean_word)
+    clean_phonetic = str(phonetic).strip() if phonetic else get_word_phonetic(clean_word)
 
     lookup_key = clean_word.lower()
-    if not CEFR_DICT or lookup_key not in CEFR_DICT:
-        if clean_cefr == "N/A":
-            clean_cefr = "N/A"
-
     if clean_cefr == "N/A" and CEFR_DICT and lookup_key in CEFR_DICT:
         clean_cefr = CEFR_DICT[lookup_key]
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     try:
-        cursor.execute("SELECT word FROM user_vocabulary WHERE word = ?", (clean_word,))
-        if cursor.fetchone():
-            conn.close()
-            return (*pipeline_load(DB_PATH), gr.update(visible=False), f"⚠️ Từ gốc **'{clean_word}'** đã tồn tại trong danh sách FSRS!")
+        # Kiểm tra sự tồn tại của từ bằng phương thức có sẵn trong DatabaseManager
+        if db.get_user_vocabulary_by_word(clean_word):
+            return (*pipeline_load(), gr.update(visible=False), f"⚠️ Từ gốc **'{clean_word}'** đã tồn tại trong danh sách FSRS!")
 
         now = datetime.datetime.now(datetime.timezone.utc)
         card = Card()
 
-        cursor.execute("""
-            INSERT INTO user_vocabulary (
-                word, cefr_j, meaning, phonetic, state, stability, difficulty, 
-                elapsed_days, scheduled_days, last_review, due, added_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            clean_word,
-            clean_cefr,
-            clean_meaning,
-            clean_phonetic,
-            card.state.value,
-            card.stability,
-            card.difficulty,
-            0, 0, None,
-            card.due.isoformat(),
-            now.isoformat()
-        ))
-        conn.commit()
+        # Lưu từ vựng thông qua upsert_user_vocabulary của DatabaseManager
+        db.upsert_user_vocabulary(
+            word=clean_word,
+            cefr_j=clean_cefr,
+            meaning=clean_meaning,
+            phonetic=clean_phonetic,
+            state=card.state.value,
+            stability=card.stability,
+            difficulty=card.difficulty,
+            elapsed_days=0,
+            scheduled_days=0,
+            last_review=None,
+            due=card.due.isoformat(),
+            added_at=now.isoformat()
+        )
         msg = f"✅ Đã thêm từ gốc thành công: **'{clean_word}'** vào FSRS!"
     except Exception as e:
         return (*error_vocab_updates, gr.update(), f"❌ Lỗi hệ thống khi lưu: {str(e)}")
-    finally:
-        conn.close()
 
     # Reset lại dữ liệu pipeline và ẩn hàng nút FSRS
-    return (*pipeline_load(DB_PATH), gr.update(visible=False), msg)
+    return (*pipeline_load(), gr.update(visible=False), msg)
 
-def add_new_word_to_db_no_ui_update(DB_PATH, CEFR_DICT, lemmatizer, word, cefr_j, meaning, phonetic=""):
+
+def add_new_word_to_db_no_ui_update(CEFR_DICT, lemmatizer, word, cefr_j, meaning, phonetic=""):
     """
     Thêm từ vào DB nhưng không cập nhật UI Vocabulary.
     Dùng khi thêm từ từ tab Reading - UI sẽ reload khi user click vào Vocabulary tab.
     """
-    # Đảm bảo số lượng update rỗng tương ứng với 12 thành phần của vocab_outputs
     empty_vocab_updates = tuple([gr.update()] * 12)
-    error_vocab_updates = tuple([gr.update()] * 12)
 
     if not word or not str(word).strip():
-        return (*error_vocab_updates, gr.update(), "⚠️ Vui lòng chọn hoặc nhập từ hợp lệ!")
+        return (*empty_vocab_updates, gr.update(), "⚠️ Vui lòng chọn hoặc nhập từ hợp lệ!")
 
     lemma_word = get_base_word(lemmatizer, word)
     if not lemma_word:
-        return (*error_vocab_updates, gr.update(), "⚠️ Không tìm thấy từ gốc hợp lệ!")
+        return (*empty_vocab_updates, gr.update(), "⚠️ Không tìm thấy từ gốc hợp lệ!")
 
     clean_word = lemma_word.capitalize() if word.strip()[0].isupper() else lemma_word
 
-    clean_meaning = str(meaning).strip() if meaning else ""
+    clean_meaning = str(meaning).strip() if meaning else "Chưa rõ nghĩa"
     clean_cefr = str(cefr_j).strip() if cefr_j else "N/A"
 
-    if not clean_meaning:
-        clean_meaning = "Chưa rõ nghĩa"
-
-    if not clean_cefr or clean_cefr == "":
+    if not clean_cefr:
         clean_cefr = "N/A"
 
-    clean_phonetic = str(phonetic).strip() if phonetic else ""
-    if not clean_phonetic:
-        clean_phonetic = get_phonetic_ipa(clean_word)
+    clean_phonetic = str(phonetic).strip() if phonetic else get_word_phonetic(clean_word)
 
     lookup_key = clean_word.lower()
-    if not CEFR_DICT or lookup_key not in CEFR_DICT:
-        if clean_cefr == "N/A":
-            clean_cefr = "N/A"
-
     if clean_cefr == "N/A" and CEFR_DICT and lookup_key in CEFR_DICT:
         clean_cefr = CEFR_DICT[lookup_key]
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     try:
-        cursor.execute("SELECT word FROM user_vocabulary WHERE word = ?", (clean_word,))
-        if cursor.fetchone():
-            conn.close()
+        if db.get_user_vocabulary_by_word(clean_word):
             return (*empty_vocab_updates, gr.update(visible=False), f"⚠️ Từ gốc **'{clean_word}'** đã tồn tại trong danh sách FSRS!")
 
         now = datetime.datetime.now(datetime.timezone.utc)
         card = Card()
 
-        cursor.execute("""
-            INSERT INTO user_vocabulary (
-                word, cefr_j, meaning, phonetic, state, stability, difficulty, 
-                elapsed_days, scheduled_days, last_review, due, added_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            clean_word,
-            clean_cefr,
-            clean_meaning,
-            clean_phonetic,
-            card.state.value,
-            card.stability,
-            card.difficulty,
-            0, 0, None,
-            card.due.isoformat(),
-            now.isoformat()
-        ))
-        conn.commit()
+        db.upsert_user_vocabulary(
+            word=clean_word,
+            cefr_j=clean_cefr,
+            meaning=clean_meaning,
+            phonetic=clean_phonetic,
+            state=card.state.value,
+            stability=card.stability,
+            difficulty=card.difficulty,
+            elapsed_days=0,
+            scheduled_days=0,
+            last_review=None,
+            due=card.due.isoformat(),
+            added_at=now.isoformat()
+        )
         msg = f"✅ Đã thêm từ gốc thành công: **'{clean_word}'** vào FSRS!"
     except Exception as e:
-        return (*error_vocab_updates, gr.update(), f"❌ Lỗi hệ thống khi lưu: {str(e)}")
-    finally:
-        conn.close()
+        return (*empty_vocab_updates, gr.update(), f"❌ Lỗi hệ thống khi lưu: {str(e)}")
 
-    # Trả về empty updates - UI Vocabulary sẽ reload khi user click vào tab
     return (*empty_vocab_updates, gr.update(visible=False), msg)

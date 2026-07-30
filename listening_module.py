@@ -9,9 +9,10 @@ import pandas as pd
 import re
 from pathlib import Path
 import glob
-
-from listening_db import ListeningDB
-db = ListeningDB()
+from vocabulary_module import process_vocabulary_info
+# Đổi sang import DatabaseManager từ file database_manager
+from database.database_manager import DatabaseManager
+db = DatabaseManager()
 
 def load_video(VIDEO_PATH):
     return VIDEO_PATH
@@ -37,7 +38,7 @@ Trả lời CHỈ bằng JSON, không thêm chữ nào khác, theo đúng format
   ]
 }}
 """
-    response = client.models.generate_content(model="gemini-2.5-flash-lite", contents=prompt)
+    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
     text = response.text.strip().replace("```json", "").replace("```", "").strip()
     return json.loads(text)["questions"]
 
@@ -201,7 +202,6 @@ def get_random_words_by_level(cefr_dict: dict, level: str, count: int = 2) -> li
         if str(lvl).strip().upper() == level.strip().upper()
     ]
     if len(words) < count:
-        # Nếu không đủ số từ trong dict thì lấy tất cả từ đang có
         return words
     return random.sample(words, count)
 
@@ -229,31 +229,48 @@ def generate_sentences_with_gemini(client, words: list) -> list:
     if json_match:
         return json.loads(json_match.group(0))
 
-    # Fallback nếu không tìm thấy cặp ngoặc vuông
     clean_json = text.replace("```json", "").replace("```", "").strip()
     return json.loads(clean_json)
 
-def get_or_generate_sentences(client, selected_words: list, cefr_level: str) -> list:
+
+def get_or_generate_sentences(client, selected_words: list, cefr_level: str, CEFR_DICT=None, translator=None,
+                              lemmatizer=None) -> list:
     results = {}
     words_to_generate = []
 
     for word in selected_words:
         record = db.get_word(word)
 
-        if record and record["examples"]:
+        if record and record.get("examples"):
             results[word] = {
                 "word": word,
                 "full_sentence": random.choice(record["examples"])
             }
         else:
-            words_to_generate.append(word)   # sửa: append word (string), không phải item (dict)
+            words_to_generate.append(word)
 
     if words_to_generate:
         generated = generate_sentences_with_gemini(client, words_to_generate)
 
         for g in generated:
-            results[g["word"]] = g
-            word_id = db.add_word(g["word"], cefr=cefr_level)
+            w_text = g["word"]
+            results[w_text] = g
+
+            # Lấy nghĩa và phiên âm IPA tự động từ vocabulary_module
+            meaning, calc_cefr, phonetic_ipa = process_vocabulary_info(CEFR_DICT, translator, lemmatizer, w_text)
+
+            # Ưu tiên lấy cefr_level truyền vào nếu calc_cefr bị N/A
+            final_cefr = cefr_level if cefr_level and cefr_level != "N/A" else calc_cefr
+
+            # Lưu từ vựng kèm meaning và ipa vào DB
+            # LƯU Ý: Đảm bảo phương thức db.add_word (hoặc db.upsert_user_vocabulary) chấp nhận tham số meaning và phonetic/ipa
+            word_id = db.add_word(
+                word=w_text,
+                cefr=final_cefr,
+                meaning=meaning,
+                phonetic=phonetic_ipa
+            )
+
             db.add_example(word_id, g["full_sentence"])
 
     return [results[word] for word in selected_words if word in results]
@@ -274,7 +291,7 @@ def get_ceft_word(CEFR_PATH):
     ))
     return cefr_dict
 
-def process_start_practice(client, cefr_dict_sample, cefr_level):
+def process_start_practice(client, cefr_dict_sample, cefr_level, translator, lemmatizer):
     selected_words = get_random_words_by_level(cefr_dict_sample, cefr_level, count=2)
     print(selected_words)
     if not selected_words:
@@ -285,7 +302,15 @@ def process_start_practice(client, cefr_dict_sample, cefr_level):
         )
 
     try:
-        generated_data = get_or_generate_sentences(client, selected_words, cefr_level)
+        # Truyền thêm cefr_dict_sample, translator, lemmatizer vào hàm
+        generated_data = get_or_generate_sentences(
+            client,
+            selected_words,
+            cefr_level,
+            CEFR_DICT=cefr_dict_sample,
+            translator=translator,
+            lemmatizer=lemmatizer
+        )
     except Exception as e:
         return (
             gr.update(visible=True), gr.update(visible=False),
@@ -312,14 +337,13 @@ def process_start_practice(client, cefr_dict_sample, cefr_level):
     first_q = parsed_questions[0]
     total = len(parsed_questions)
 
-    # ĐỦ 13 GIÁ TRỊ TRẢ VỀ:
     return (
         gr.update(visible=False),      # 1. setup_panel
         gr.update(visible=True),       # 2. practice_panel
         parsed_questions,              # 3. state_words_data
         0,                             # 4. state_current_index
         0,                             # 5. state_score
-        "",                            # 6. status_output (ĐÃ THÊM: làm sạch thông báo lỗi/trạng thái)
+        "",                            # 6. status_output
         f"Câu 1/{total}",              # 7. progress_tracker
         first_q["display_sentence"],   # 8. sentence_display
         first_q["audio"],              # 9. audio_player
@@ -401,13 +425,10 @@ def clear_transcript(AUDIO_PATH, transcript):
 
     match = re.search(r'([^.!?]*\.com[^.!?]*[.!?])', transcript)
 
-    clean_transcript = transcript  # fallback nếu không tìm thấy .com
+    clean_transcript = transcript  # fallback
     if match:
-        # Vị trí .com trong toàn bộ transcript
         com_index_in_transcript = transcript.find('.com', match.start())
-
-        # Tìm dấu chấm đầu tiên SAU vị trí .com (bắt đầu tìm từ sau chữ 'm')
-        after_com = com_index_in_transcript + 4  # ngay sau ".com"
+        after_com = com_index_in_transcript + 4
         next_dot_index = transcript.find('.', after_com)
 
         if next_dot_index != -1:
@@ -436,11 +457,9 @@ def extract_important_token(nlp, transcript, max_blanks=30):
         if len(selected_tokens) >= max_blanks:
             break
 
-        # Bỏ qua từ viết tắt/dấu nối (re, ve, ll, s, t, d...)
         if "'" in token.text or "’" in token.text:
             continue
 
-        # Chỉ lấy NOUN, VERB, ADJ, PROPN
         if token.pos_ not in {"NOUN", "VERB", "ADJ", "PROPN"}:
             continue
 
@@ -451,7 +470,6 @@ def extract_important_token(nlp, transcript, max_blanks=30):
         if lemma in used_lemmas:
             continue
 
-        # Đảm bảo không lấy 2 từ nằm quá sát nhau (cách nhau dưới 2 ký tự) để tránh dính (19)(20)(21)
         if selected_tokens and (token.idx - (selected_tokens[-1].idx + len(selected_tokens[-1].text)) < 3):
             continue
 
@@ -459,7 +477,6 @@ def extract_important_token(nlp, transcript, max_blanks=30):
         selected_tokens.append(token)
         important_tokens.append(token.text)
 
-    # Thay thế từ bằng chỗ trống
     output = []
     last = 0
     for idx, token in enumerate(selected_tokens, start=1):
@@ -477,6 +494,7 @@ PAGE_SIZE = 4
 def transcribe_short_audio_text(whisper, nlp, AUDIO_PATH_FOLDER, mp3_name):
     AUDIO_PATH = get_path_audio(AUDIO_PATH_FOLDER, mp3_name)
 
+    # Sử dụng db.get_mp3_transcript từ DatabaseManager
     cached_transcript = db.get_mp3_transcript(mp3_name)
 
     if cached_transcript:
@@ -484,12 +502,12 @@ def transcribe_short_audio_text(whisper, nlp, AUDIO_PATH_FOLDER, mp3_name):
     else:
         result = whisper.transcribe(AUDIO_PATH, fp16=False)
         raw_text = result["text"].strip()
+        # Sử dụng db.add_mp3_transcript từ DatabaseManager
         db.add_mp3_transcript(mp3_name, raw_text)
 
     transcript, label_audio = clear_transcript(AUDIO_PATH, raw_text)
     blank_text, answers = extract_important_token(nlp, transcript)
 
-    # Khởi tạo đáp án của người dùng
     user_answers = [""] * len(answers)
 
     return (
@@ -502,21 +520,16 @@ def transcribe_short_audio_text(whisper, nlp, AUDIO_PATH_FOLDER, mp3_name):
         user_answers,
         0,
         *show_page(0, answers, user_answers),
-        gr.update(label=f"{label_audio}")
+        gr.update(value=AUDIO_PATH, label=f"{label_audio}")
     )
 
 def show_page(page, answers, user_answers):
-
     start = page * PAGE_SIZE
-
     updates = []
 
     for i in range(PAGE_SIZE):
-
         idx = start + i
-
         if idx < len(answers):
-
             updates.append(
                 gr.update(
                     visible=True,
@@ -524,9 +537,7 @@ def show_page(page, answers, user_answers):
                     value=user_answers[idx]
                 )
             )
-
         else:
-
             updates.append(
                 gr.update(
                     visible=False,
@@ -544,17 +555,12 @@ def save_current_page(
     box3,
     box4
 ):
-
     user_answers = user_answers.copy()
-
     start = page * PAGE_SIZE
-
     values = [box1, box2, box3, box4]
 
     for i, value in enumerate(values):
-
         idx = start + i
-
         if idx < len(user_answers):
             user_answers[idx] = value
 
@@ -569,7 +575,6 @@ def next_page(
     box3,
     box4
 ):
-
     user_answers = save_current_page(
         page,
         user_answers,
@@ -580,7 +585,6 @@ def next_page(
     )
 
     max_page = (len(answers)-1)//PAGE_SIZE
-
     page = min(page+1, max_page)
 
     return (
@@ -598,7 +602,6 @@ def previous_page(
     box3,
     box4
 ):
-
     user_answers = save_current_page(
         page,
         user_answers,
@@ -625,7 +628,6 @@ def check_answer_listen_paragraph(
     box3,
     box4
 ):
-
     user_answers = save_current_page(
         page,
         user_answers,
@@ -638,7 +640,6 @@ def check_answer_listen_paragraph(
     score = 0
 
     for gt, user in zip(correct_answers, user_answers):
-
         if gt.lower().strip() == user.lower().strip():
             score += 1
 
@@ -657,10 +658,8 @@ def get_mp3_filename(folder_path):
 
 def load_value_ratio_audio(folder_path):
     mp3_names = get_mp3_filename(folder_path)
-    return gr.update(choices =  mp3_names, value = mp3_names[1])
+    return gr.update(choices = mp3_names, value = mp3_names[1])
 
 def get_path_audio(folder_path, mp3_name):
     mp3_path = os.path.join(folder_path, mp3_name)
     return mp3_path
-
-
