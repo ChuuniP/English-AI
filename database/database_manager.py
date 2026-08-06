@@ -60,6 +60,31 @@ CREATE TABLE IF NOT EXISTS topics (
     category TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_topics_category ON topics(category);
+
+-- 7. Bảng lưu trữ bài đọc (Reading) kèm bộ câu hỏi hiểu bài
+CREATE TABLE IF NOT EXISTS reading_passages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    cefr TEXT CHECK (cefr IN ('A1','A2','B1','B2','C1','C2')),
+    passage TEXT NOT NULL,
+    questions_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reading_passages_cefr ON reading_passages(cefr);
+
+-- 8. Table storing writing practice prompts
+CREATE TABLE IF NOT EXISTS writing_prompts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_type TEXT,
+    topic_category TEXT,
+    difficulty TEXT CHECK (difficulty IN ('Beginner','Intermediate','Advanced')),
+    question_text TEXT NOT NULL,
+    background_info TEXT,
+    min_words INTEGER,
+    suggested_time_minutes INTEGER,
+    tags TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_writing_prompts_difficulty ON writing_prompts(difficulty);
+CREATE INDEX IF NOT EXISTS idx_writing_prompts_topic_category ON writing_prompts(topic_category);
 """
 
 _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -572,6 +597,283 @@ class DatabaseManager:
             """, (limit,))
         rows = cur.fetchall()
         return [dict(row) for row in rows]
+
+    # --- QUẢN LÝ BÀI ĐỌC (Reading) ---
+
+    def add_reading_passage(self, title: str = None, cefr: str = None, passage: str = "", questions: list = None) -> int:
+        """Thêm mới 1 bài đọc kèm bộ câu hỏi (nếu có). Trả về passage_id."""
+        if not passage or not passage.strip():
+            raise ValueError("Nội dung bài đọc không được để trống!")
+
+        questions_json = json.dumps(questions, ensure_ascii=False) if questions is not None else None
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO reading_passages (title, cefr, passage, questions_json) VALUES (?, ?, ?, ?)",
+            (title, cefr, passage.strip(), questions_json)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_reading_passage(self, passage_id: int) -> dict | None:
+        """Truy xuất thông tin 1 bài đọc (kèm câu hỏi đã parse) theo id."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT id, title, cefr, passage, questions_json FROM reading_passages WHERE id = ?",
+            (passage_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        questions = None
+        if row["questions_json"]:
+            try:
+                questions = json.loads(row["questions_json"])
+            except (TypeError, ValueError):
+                questions = None
+
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "cefr": row["cefr"],
+            "passage": row["passage"],
+            "questions": questions
+        }
+
+    def get_reading_questions(self, passage_id: int) -> list | None:
+        """Truy xuất riêng bộ câu hỏi của 1 bài đọc, nếu có."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT questions_json FROM reading_passages WHERE id = ?", (passage_id,))
+        row = cur.fetchone()
+        if not row or not row["questions_json"]:
+            return None
+        try:
+            return json.loads(row["questions_json"])
+        except (TypeError, ValueError):
+            return None
+
+    def list_all_reading_passages(self, cefr: str = None) -> list[dict]:
+        """Lấy toàn bộ bài đọc trong hệ thống, có thể lọc theo cấp độ CEFR."""
+        cur = self.conn.cursor()
+        if cefr:
+            cur.execute(
+                "SELECT id, title, cefr, passage, questions_json FROM reading_passages WHERE cefr = ?",
+                (cefr,)
+            )
+        else:
+            cur.execute("SELECT id, title, cefr, passage, questions_json FROM reading_passages")
+        rows = cur.fetchall()
+
+        results = []
+        for row in rows:
+            questions = None
+            if row["questions_json"]:
+                try:
+                    questions = json.loads(row["questions_json"])
+                except (TypeError, ValueError):
+                    questions = None
+            results.append({
+                "id": row["id"],
+                "title": row["title"],
+                "cefr": row["cefr"],
+                "passage": row["passage"],
+                "questions": questions
+            })
+        return results
+
+    def update_reading_passage(self, passage_id: int, title: str = None, cefr: str = None,
+                                passage: str = None, questions: list = None):
+        """Cập nhật 1 bài đọc theo id. Chỉ cập nhật những trường được truyền vào."""
+        cur = self.conn.cursor()
+        if title is not None:
+            cur.execute("UPDATE reading_passages SET title = ? WHERE id = ?", (title, passage_id))
+        if cefr is not None:
+            cur.execute("UPDATE reading_passages SET cefr = ? WHERE id = ?", (cefr, passage_id))
+        if passage is not None:
+            cur.execute("UPDATE reading_passages SET passage = ? WHERE id = ?", (passage.strip(), passage_id))
+        if questions is not None:
+            questions_json = json.dumps(questions, ensure_ascii=False)
+            cur.execute("UPDATE reading_passages SET questions_json = ? WHERE id = ?", (questions_json, passage_id))
+        self.conn.commit()
+
+    def delete_reading_passage(self, passage_id: int):
+        """Xoá 1 bài đọc theo id."""
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM reading_passages WHERE id = ?", (passage_id,))
+        self.conn.commit()
+
+    def get_random_reading_passage(self, cefr: str = None) -> dict | None:
+        """Lấy ngẫu nhiên 1 bài đọc, có thể lọc theo cấp độ CEFR."""
+        cur = self.conn.cursor()
+        if cefr:
+            cur.execute("""
+                SELECT id, title, cefr, passage, questions_json FROM reading_passages
+                WHERE cefr = ?
+                ORDER BY RANDOM() LIMIT 1
+            """, (cefr,))
+        else:
+            cur.execute("""
+                SELECT id, title, cefr, passage, questions_json FROM reading_passages
+                ORDER BY RANDOM() LIMIT 1
+            """)
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        questions = None
+        if row["questions_json"]:
+            try:
+                questions = json.loads(row["questions_json"])
+            except (TypeError, ValueError):
+                questions = None
+
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "cefr": row["cefr"],
+            "passage": row["passage"],
+            "questions": questions
+        }
+
+    # --- WRITING PROMPTS MANAGEMENT ---
+
+    def add_writing_prompt(
+            self,
+            question_text: str,
+            task_type: str = None,
+            topic_category: str = None,
+            difficulty: str = None,
+            background_info: str = None,
+            min_words: int = None,
+            suggested_time_minutes: int = None,
+            tags: str = None
+    ) -> int:
+        """Add a new writing prompt. Returns the prompt_id."""
+        if not question_text or not question_text.strip():
+            raise ValueError("Question text cannot be empty!")
+
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO writing_prompts
+            (task_type, topic_category, difficulty, question_text, background_info, min_words, suggested_time_minutes, tags)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            task_type,
+            topic_category,
+            difficulty,
+            question_text.strip(),
+            background_info,
+            min_words,
+            suggested_time_minutes,
+            tags
+        ))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_writing_prompt(self, prompt_id: int) -> dict | None:
+        """Retrieve a single writing prompt by id."""
+        cur = self.conn.cursor()
+        cur.execute("""
+            SELECT id, task_type, topic_category, difficulty, question_text,
+                   background_info, min_words, suggested_time_minutes, tags
+            FROM writing_prompts WHERE id = ?
+        """, (prompt_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_all_writing_prompts(self, difficulty: str = None, topic_category: str = None) -> list[dict]:
+        """Retrieve all writing prompts, optionally filtered by difficulty and/or topic_category."""
+        cur = self.conn.cursor()
+        query = """
+            SELECT id, task_type, topic_category, difficulty, question_text,
+                   background_info, min_words, suggested_time_minutes, tags
+            FROM writing_prompts
+        """
+        conditions = []
+        params = []
+        if difficulty:
+            conditions.append("difficulty = ?")
+            params.append(difficulty)
+        if topic_category:
+            conditions.append("topic_category = ?")
+            params.append(topic_category)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        cur.execute(query, params)
+        return [dict(row) for row in cur.fetchall()]
+
+    def list_all_writing_topic_categories(self) -> list[str]:
+        """Retrieve the distinct list of topic_category values in the writing_prompts table."""
+        cur = self.conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT topic_category FROM writing_prompts
+            WHERE topic_category IS NOT NULL AND topic_category != ''
+            ORDER BY topic_category
+        """)
+        return [row["topic_category"] for row in cur.fetchall()]
+
+    def update_writing_prompt(
+            self,
+            prompt_id: int,
+            task_type: str = None,
+            topic_category: str = None,
+            difficulty: str = None,
+            question_text: str = None,
+            background_info: str = None,
+            min_words: int = None,
+            suggested_time_minutes: int = None,
+            tags: str = None
+    ):
+        """Update a writing prompt by id. Only the provided fields are updated."""
+        cur = self.conn.cursor()
+        if task_type is not None:
+            cur.execute("UPDATE writing_prompts SET task_type = ? WHERE id = ?", (task_type, prompt_id))
+        if topic_category is not None:
+            cur.execute("UPDATE writing_prompts SET topic_category = ? WHERE id = ?", (topic_category, prompt_id))
+        if difficulty is not None:
+            cur.execute("UPDATE writing_prompts SET difficulty = ? WHERE id = ?", (difficulty, prompt_id))
+        if question_text is not None:
+            cur.execute("UPDATE writing_prompts SET question_text = ? WHERE id = ?", (question_text.strip(), prompt_id))
+        if background_info is not None:
+            cur.execute("UPDATE writing_prompts SET background_info = ? WHERE id = ?", (background_info, prompt_id))
+        if min_words is not None:
+            cur.execute("UPDATE writing_prompts SET min_words = ? WHERE id = ?", (min_words, prompt_id))
+        if suggested_time_minutes is not None:
+            cur.execute("UPDATE writing_prompts SET suggested_time_minutes = ? WHERE id = ?", (suggested_time_minutes, prompt_id))
+        if tags is not None:
+            cur.execute("UPDATE writing_prompts SET tags = ? WHERE id = ?", (tags, prompt_id))
+        self.conn.commit()
+
+    def delete_writing_prompt(self, prompt_id: int):
+        """Delete a writing prompt by id."""
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM writing_prompts WHERE id = ?", (prompt_id,))
+        self.conn.commit()
+
+    def get_random_writing_prompt(self, difficulty: str = None, topic_category: str = None) -> dict | None:
+        """Retrieve one random writing prompt, optionally filtered by difficulty and/or topic_category."""
+        cur = self.conn.cursor()
+        query = """
+            SELECT id, task_type, topic_category, difficulty, question_text,
+                   background_info, min_words, suggested_time_minutes, tags
+            FROM writing_prompts
+        """
+        conditions = []
+        params = []
+        if difficulty:
+            conditions.append("difficulty = ?")
+            params.append(difficulty)
+        if topic_category:
+            conditions.append("topic_category = ?")
+            params.append(topic_category)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY RANDOM() LIMIT 1"
+
+        cur.execute(query, params)
+        row = cur.fetchone()
+        return dict(row) if row else None
 
 
 if __name__ == "__main__":

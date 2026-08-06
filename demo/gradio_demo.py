@@ -860,42 +860,140 @@ with gr.Blocks() as demo:
             cached_reading_text = gr.State(value="")
             with gr.Column(visible=False) as view_read:
                 with gr.Tabs():
-                    with gr.Tab("Reading"):
-                        with gr.Column():
-                            topic_reading_dropdown = gr.Dropdown(
-                                label="Topic",
-                                choices=[],
-                                value="",
-                                interactive=True,
-                            )
-                            gr.Markdown("")
-                            start_reading_btn = gr.Button(
-                                "▶️ Bắt đầu",
-                                variant="primary",
-                                scale=0,
-                                min_width=160,
-                            )
-                            gr.Markdown("")
-                        with gr.Column(visible=True) as content_reading_panel:
-                            with gr.Row():
-                                reading_title_md = gr.Markdown()  # tiêu đề bài đọc
-                                reading_passage_md = gr.Markdown(
-                                    elem_id="reading-zone-active",
-                                    # khớp id mà selection_listener.js đang lắng nghe để tra từ
-                                )
+                    with gr.Tab("Practice") as rp_tab:
+                        rp_questions_state = gr.State([])
+                        rp_current_index_state = gr.State(0)
+                        rp_answers_state = gr.State([])
+                        rp_list_state = gr.State([])
 
-                            with gr.Row():
-                                change_reading_btn = gr.Button("🔀 Đổi bài khác", variant="secondary", scale=1)
+                        with gr.Column(visible=True) as rp_list_panel:
+                            gr.Markdown("### 📚 Chọn một bài đọc để luyện tập")
+                            # rp_refresh_btn = gr.Button("🔄 Làm mới danh sách", variant="secondary", scale=0)
+                            rp_list_df = gr.Dataframe(
+                                headers=["ID", "Tiêu đề", "CEFR"],
+                                datatype="str",
+                                interactive=False,
+                            )
+
+                        # Cùng lý do: khai báo visible=True để tránh lỗi Gradio không hiện component
+                        # ở lần gr.update(visible=True) đầu tiên (panel này bị ẩn ngay bên dưới bởi
+                        # rp_tab.select() nên không lộ ra khi mới load tab).
+                        with gr.Column(visible=True) as rp_detail_panel:
+                            rp_back_btn = gr.Button("🔀 Quay lại danh sách", variant="secondary", scale=0)
+                            rp_title_md = gr.Markdown()
+                            rp_passage_md = gr.Markdown(elem_id="reading-zone-active")
 
                             gr.Markdown("---")
                             gr.Markdown("### ❓ Câu hỏi")
-                            reading_questions_group = gr.Radio(
-                                choices=[],  # sẽ đổ đáp án theo từng câu hỏi
-                                label="",
-                                interactive=True,
+
+                            with gr.Column(visible=True) as rp_question_panel:
+                                rp_progress_md = gr.Markdown()
+                                rp_question_md = gr.Markdown()
+                                rp_options_radio = gr.Radio(
+                                    choices=[],
+                                    label="Chọn đáp án",
+                                    interactive=True,
+                                )
+                                rp_warning_md = gr.Markdown(value="", visible=True)
+                                with gr.Row():
+                                    rp_prev_btn = gr.Button("⬅️ Previous", interactive=False)
+                                    rp_next_btn = gr.Button("Next ➡️", variant="primary")
+                                    rp_submit_btn = gr.Button("✅ Nộp bài", variant="primary", visible=True)
+
+                            with gr.Column(visible=True) as rp_result_panel:
+                                rp_result_md = gr.Markdown()
+                                with gr.Row():
+                                    rp_retry_btn = gr.Button("🔄 Làm lại", variant="secondary")
+                                    rp_back2_btn = gr.Button("🔀 Quay lại danh sách", variant="secondary")
+
+                        # --- Sự kiện: tải danh sách khi mở tab / bấm làm mới ---
+                        def _load_reading_tab(_db):
+                            rows, rows_state = rm.load_reading_list_for_ui(_db)
+                            return (
+                                rows, rows_state,
+                                gr.update(visible=True),  # rp_list_panel
+                                gr.update(visible=False),  # rp_detail_panel
+                                gr.update(visible=False),  # rp_result_panel
                             )
-                            submit_answer_btn = gr.Button("✅ Nộp bài", variant="primary")
-                            reading_result_md = gr.Markdown(visible=False)
+
+                        rp_tab.select(
+                            fn=lambda: _load_reading_tab(db),
+                            outputs=[rp_list_df, rp_list_state, rp_list_panel, rp_detail_panel, rp_result_panel]
+                        )
+                        # rp_refresh_btn.click(
+                        #     fn=lambda: rm.load_reading_list_for_ui(db),
+                        #     outputs=[rp_list_df, rp_list_state]
+                        # )
+
+                        # --- Sự kiện: click 1 dòng để mở bài đọc ---
+                        def _on_select_reading_passage(evt: gr.SelectData, table_data):
+                            return rm.open_reading_passage(evt, table_data, db)
+
+                        rp_list_df.select(
+                            fn=_on_select_reading_passage,
+                            inputs=[rp_list_state],
+                            outputs=[
+                                rp_list_panel, rp_detail_panel, rp_result_panel,
+                                rp_title_md, rp_passage_md,
+                                rp_questions_state, rp_current_index_state, rp_answers_state,
+                                rp_question_md, rp_options_radio, rp_progress_md,
+                                rp_prev_btn, rp_next_btn, rp_submit_btn,
+                                rp_question_panel, rp_warning_md,
+                            ]
+                        )
+
+                        # --- Sự kiện: Next / Previous ---
+                        rp_next_btn.click(
+                            fn=lambda idx, qs, ans, sel: rm.go_to_question(1, idx, qs, ans, sel),
+                            inputs=[rp_current_index_state, rp_questions_state, rp_answers_state, rp_options_radio],
+                            outputs=[
+                                rp_current_index_state, rp_answers_state,
+                                rp_question_md, rp_options_radio, rp_progress_md,
+                                rp_prev_btn, rp_next_btn, rp_submit_btn,
+                            ]
+                        )
+                        rp_prev_btn.click(
+                            fn=lambda idx, qs, ans, sel: rm.go_to_question(-1, idx, qs, ans, sel),
+                            inputs=[rp_current_index_state, rp_questions_state, rp_answers_state, rp_options_radio],
+                            outputs=[
+                                rp_current_index_state, rp_answers_state,
+                                rp_question_md, rp_options_radio, rp_progress_md,
+                                rp_prev_btn, rp_next_btn, rp_submit_btn,
+                            ]
+                        )
+
+                        # --- Sự kiện: Nộp bài ---
+                        rp_submit_btn.click(
+                            fn=rm.submit_reading_quiz,
+                            inputs=[rp_current_index_state, rp_questions_state, rp_answers_state, rp_options_radio],
+                            outputs=[
+                                rp_answers_state, rp_question_panel, rp_result_panel,
+                                rp_result_md, rp_warning_md,
+                                rp_prev_btn, rp_next_btn, rp_submit_btn,
+                            ]
+                        )
+
+                        # --- Sự kiện: Làm lại / Quay lại danh sách ---
+                        rp_retry_btn.click(
+                            fn=rm.retry_reading_quiz,
+                            inputs=[rp_questions_state],
+                            outputs=[
+                                rp_current_index_state, rp_answers_state,
+                                rp_question_md, rp_options_radio, rp_progress_md,
+                                rp_prev_btn, rp_next_btn, rp_submit_btn,
+                                rp_question_panel, rp_result_panel, rp_warning_md,
+                            ]
+                        )
+                        rp_back_btn.click(
+                            fn=lambda: rm.back_to_reading_list(db),
+                            outputs=[rp_list_panel, rp_detail_panel, rp_result_panel, rp_list_df, rp_list_state]
+                        )
+                        rp_back2_btn.click(
+                            fn=lambda: rm.back_to_reading_list(db),
+                            outputs=[rp_list_panel, rp_detail_panel, rp_result_panel, rp_list_df, rp_list_state]
+                        )
+
+
                     with gr.Tab("Personal"):
                         with gr.Row():
                             with gr.Column(scale=3):
@@ -1002,53 +1100,124 @@ with gr.Blocks() as demo:
             with gr.Column(visible=False) as view_write:
                 with gr.Tabs():
                     with gr.Tab("Writting"):
-                        with gr.Row() as start_writing_panel:
-                            with gr.Column():
-                                gr.Markdown("### ✍️ Chọn đề Writing")
-                                writing_dropdown = gr.Dropdown(
+
+                        # ==================================================
+                        # PANEL 1 — SETUP SCREEN: chọn đề (chưa xử lý logic)
+                        # ==================================================
+                        with gr.Column(visible=True) as start_writing_panel:
+                            gr.Markdown("### ✍️ Chọn đề Writing")
+
+                            with gr.Row():
+                                writing_difficulty_radio = gr.Radio(
+                                    label="Độ khó",
+                                    choices=["Beginner", "Intermediate", "Advanced"],
+                                    value="",
+                                )
+                                writing_topic_dropdown = gr.Dropdown(
                                     label="Chủ đề",
                                     choices=[],  # sẽ đổ dữ liệu từ DB sau
-                                    value=None,
+                                    value="",
                                     interactive=True,
                                 )
+                                writing_task_type_dropdown = gr.Dropdown(
+                                    label="Dạng bài",
+                                    choices=[],  # sẽ đổ dữ liệu từ DB sau
+                                    value="",
+                                    interactive=True,
+                                )
+
+                            writing_prompt_preview_md = gr.Markdown(
+                                "*Đề bài xem trước sẽ hiển thị tại đây sau khi chọn hoặc random.*",
+                                elem_id="writing-prompt-preview",
+                            )
+
+                            with gr.Row():
+                                random_writing_btn = gr.Button(
+                                    "🎲 Random đề",
+                                    variant="secondary",
+                                    scale=1,
+                                )
                                 start_writing_btn = gr.Button(
-                                    "▶️ Bắt đầu",
+                                    "▶️ Bắt đầu viết",
                                     variant="primary",
-                                    scale=0,
-                                    min_width=160,
+                                    scale=1,
                                 )
 
-                        # ---- Panel 2: đề bài + khung viết bài (ẩn ban đầu) ----
-                        with gr.Row(visible=False) as content_writing_panel:
-                            with gr.Column():
-                                writing_prompt_md = gr.Markdown(
-                                    elem_id="writing-prompt-card",
+                        # ==================================================
+                        # PANEL 2 — WRITING SCREEN: viết bài (ẩn ban đầu)
+                        # ==================================================
+                        with gr.Column(visible=False) as content_writing_panel:
+
+                            with gr.Row():
+                                writing_badge_md = gr.Markdown(
+                                    "`Intermediate` · `Opinion`",
+                                    elem_id="writing-badge",
+                                )
+                                writing_timer_md = gr.Markdown(
+                                    "⏱️ 00:00",
+                                    elem_id="writing-timer",
+                                )
+                                writing_wordcount_md = gr.Markdown(
+                                    "📝 0 / 250 từ",
+                                    elem_id="writing-wordcount",
                                 )
 
-                                with gr.Row():
-                                    writing_min_words_md = gr.Markdown()  # "Số từ tối thiểu: 250 từ"
-                                    writing_time_md = gr.Markdown()  # "Thời gian: 30 phút"
+                            writing_prompt_md = gr.Markdown(
+                                elem_id="writing-prompt-card",
+                            )
 
-                                writing_textbox = gr.Textbox(
-                                    label="Bài viết của bạn",
-                                    placeholder="Nhập bài viết của bạn tại đây...",
-                                    lines=12,
+                            with gr.Accordion("Xem thông tin nền (background info)", open=False):
+                                writing_background_info_md = gr.Markdown()
+
+                            writing_textbox = gr.Textbox(
+                                label="Bài viết của bạn",
+                                placeholder="Nhập bài viết của bạn tại đây...",
+                                lines=14,
+                            )
+
+                            with gr.Row():
+                                save_draft_writing_btn = gr.Button("💾 Lưu nháp", variant="secondary", scale=1)
+                                change_writing_btn = gr.Button("🔀 Đổi đề khác", variant="secondary", scale=1)
+                                submit_writing_btn = gr.Button("✅ Nộp bài", variant="primary", scale=1)
+
+                        # ==================================================
+                        # PANEL 3 — RESULTS SCREEN: kết quả chấm bài (ẩn ban đầu)
+                        # ==================================================
+                        with gr.Column(visible=False) as respond_writing_panel:
+                            gr.Markdown("---")
+                            gr.Markdown("### 📊 Kết quả bài viết")
+
+                            with gr.Row():
+                                with gr.Column(scale=1, min_width=110):
+                                    result_overall_score_md = gr.Markdown(
+                                        "## --\n*Điểm tổng*",
+                                        elem_id="writing-overall-score",
+                                    )
+                                with gr.Column(scale=3):
+                                    with gr.Row():
+                                        score_task_response = gr.Label(label="Task Response", value="--")
+                                        score_coherence = gr.Label(label="Coherence & Cohesion", value="--")
+                                    with gr.Row():
+                                        score_lexical = gr.Label(label="Lexical Resource", value="--")
+                                        score_grammar_writing = gr.Label(label="Grammar", value="--")
+
+                            gr.Markdown("#### Bài viết của bạn (lỗi được đánh dấu)")
+                            result_annotated_essay_html = gr.HTML(
+                                value="<div class='writing-annotated-essay'><em>Bài viết đã chấm sẽ hiển thị tại đây, kèm đánh dấu lỗi.</em></div>",
+                            )
+
+                            with gr.Accordion("💡 Feedback chi tiết", open=True):
+                                result_feedback_md = gr.Markdown(
+                                    "*Nhận xét chi tiết theo từng tiêu chí và gợi ý sửa lỗi sẽ hiển thị tại đây.*"
                                 )
-                                writing_wordcount_md = gr.Markdown("0 từ")
 
-                                with gr.Row():
-                                    change_writing_btn = gr.Button("🔀 Đổi đề khác", variant="secondary", scale=1)
-                                    submit_writing_btn = gr.Button("✅ Nộp bài", variant="primary", scale=1)
+                            with gr.Accordion("📖 Bài mẫu tham khảo", open=False):
+                                result_model_essay_md = gr.Markdown()
 
-                        # ---- Panel 3: kết quả chấm bài (ẩn ban đầu) ----
-                        with gr.Row(visible=False) as respond_writing_panel:
-                            with gr.Column():
-                                gr.Markdown("---")
-                                result_writing_summary = gr.Markdown()  # nhận xét tổng quan + điểm
-                                with gr.Row():
-                                    grammar_writing_out = gr.Markdown(label="Ngữ pháp")
-                                    vocab_writing_out = gr.Markdown(label="Từ vựng")
-                                    structure_writing_out = gr.Markdown(label="Bố cục")
+                            with gr.Row():
+                                retry_writing_btn = gr.Button("🔁 Viết lại đề này", variant="secondary", scale=1)
+                                next_writing_btn = gr.Button("➡️ Đề tiếp theo", variant="secondary", scale=1)
+                                save_history_writing_btn = gr.Button("📌 Lưu vào lịch sử", variant="primary", scale=1)
                     with gr.Tab("Personal"):
                         with gr.Row(elem_id="writing-tab-row", equal_height=False):
                             with gr.Column(scale=1):

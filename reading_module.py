@@ -240,3 +240,194 @@ def add_new_word_to_db_no_ui_update(CEFR_DICT, lemmatizer, word, cefr_j, meaning
         return (*empty_vocab_updates, gr.update(), f"❌ Lỗi hệ thống khi lưu: {str(e)}")
 
     return (*empty_vocab_updates, gr.update(visible=False), msg)
+
+# ------------------------------------------
+
+def load_reading_list(db):
+    """Trả về dữ liệu cho gr.Dataframe: mỗi dòng là [id, title, cefr]."""
+    passages = db.list_all_reading_passages()
+    rows = [
+        [p["id"], p["title"] or f"Reading {p['id']}", p["cefr"] or "-"]
+        for p in passages
+    ]
+    return rows
+
+
+def load_reading_list_for_ui(db):
+    rows = load_reading_list(db)
+    return rows, rows
+
+
+def back_to_reading_list(db):
+    rows = load_reading_list(db)
+    return (
+        gr.update(visible=True),  # rp_list_panel
+        gr.update(visible=False),  # rp_detail_panel
+        gr.update(visible=False),  # rp_result_panel
+        rows,  # rp_list_df
+        rows,  # rp_list_state
+    )
+
+
+# ---------- Mở 1 bài đọc ----------
+
+def _render_question(idx: int, questions: list, answers: list):
+    """Dựng nội dung hiển thị cho câu hỏi thứ idx (0-based)."""
+    total = len(questions)
+    q = questions[idx]
+
+    question_md = f"**Câu {idx + 1}/{total}:** {q['question']}"
+    progress_md = f"Câu {idx + 1}/{total}"
+    choices = q["options"]
+    radio_value = answers[idx]  # None nếu chưa chọn
+
+    prev_interactive = idx > 0
+    next_visible = idx < total - 1
+    submit_visible = idx == total - 1
+
+    return question_md, choices, radio_value, progress_md, prev_interactive, next_visible, submit_visible
+
+
+def open_reading_passage(evt: gr.SelectData, table_data, db):
+    """Xử lý khi người dùng click vào 1 dòng trong bảng danh sách bài đọc."""
+    row_index = evt.index[0]
+    passage_id = int(table_data[row_index][0])
+
+    data = db.get_reading_passage(passage_id)
+    questions = data["questions"] or []
+    answers = [None] * len(questions)
+
+    title_md = f"## {data['title'] or f'Reading {passage_id}'}\n**CEFR:** {data['cefr'] or 'N/A'}"
+    passage_md = data["passage"]
+
+    (question_md, choices, radio_value, progress_md,
+     prev_interactive, next_visible, submit_visible) = _render_question(0, questions, answers)
+
+    return (
+        gr.update(visible=False),  # rp_list_panel
+        gr.update(visible=True),  # rp_detail_panel
+        gr.update(visible=False),  # rp_result_panel
+        title_md,  # rp_title_md
+        passage_md,  # rp_passage_md
+        questions,  # rp_questions_state
+        0,  # rp_current_index_state
+        answers,  # rp_answers_state
+        question_md,  # rp_question_md
+        gr.update(choices=choices, value=radio_value),  # rp_options_radio
+        progress_md,  # rp_progress_md
+        gr.update(interactive=prev_interactive),  # rp_prev_btn
+        gr.update(visible=next_visible),  # rp_next_btn
+        gr.update(visible=submit_visible),  # rp_submit_btn
+        gr.update(visible=True),  # rp_question_panel
+        gr.update(visible=False, value=""),  # rp_warning_md
+    )
+
+
+# ---------- Điều hướng câu hỏi ----------
+
+def go_to_question(direction: int, current_index: int, questions: list, answers: list, selected_answer):
+    """direction: +1 (Next) hoặc -1 (Previous). Lưu đáp án hiện tại trước khi chuyển câu."""
+    answers = list(answers)
+    answers[current_index] = selected_answer
+
+    new_index = current_index + direction
+    new_index = max(0, min(new_index, len(questions) - 1))
+
+    (question_md, choices, radio_value, progress_md,
+     prev_interactive, next_visible, submit_visible) = _render_question(new_index, questions, answers)
+
+    return (
+        new_index,  # rp_current_index_state
+        answers,  # rp_answers_state
+        question_md,  # rp_question_md
+        gr.update(choices=choices, value=radio_value),  # rp_options_radio
+        progress_md,  # rp_progress_md
+        gr.update(interactive=prev_interactive),  # rp_prev_btn
+        gr.update(visible=next_visible),  # rp_next_btn
+        gr.update(visible=submit_visible),  # rp_submit_btn
+    )
+
+
+# ---------- Nộp bài ----------
+
+def submit_reading_quiz(current_index: int, questions: list, answers: list, selected_answer):
+    """Lưu đáp án câu cuối, kiểm tra đã trả lời đủ chưa, và chấm điểm nếu đủ."""
+    answers = list(answers)
+    answers[current_index] = selected_answer
+
+    total = len(questions)
+    # Luôn ép lại đúng trạng thái 3 nút điều hướng theo current_index, thay vì
+    # để nguyên giá trị cũ (giá trị cũ có thể sai lệch, gây ra lỗi hiện nút
+    # "Next" dù đang ở câu cuối cùng).
+    prev_interactive = current_index > 0
+    next_visible = current_index < total - 1
+    submit_visible = current_index == total - 1
+
+    unanswered = [i + 1 for i, a in enumerate(answers) if a is None]
+    if unanswered:
+        warning = (
+                "⚠️ Bạn chưa trả lời câu: " + ", ".join(str(i) for i in unanswered) +
+                ". Vui lòng hoàn thành tất cả câu hỏi trước khi nộp bài."
+        )
+        return (
+            answers,  # rp_answers_state
+            gr.update(visible=True),  # rp_question_panel (vẫn giữ)
+            gr.update(visible=False),  # rp_result_panel
+            "",  # rp_result_md
+            gr.update(visible=True, value=warning),  # rp_warning_md
+            gr.update(interactive=prev_interactive),  # rp_prev_btn
+            gr.update(visible=next_visible),  # rp_next_btn
+            gr.update(visible=submit_visible),  # rp_submit_btn
+        )
+
+    score = sum(1 for a, q in zip(answers, questions) if a == q["answer"])
+
+    lines = [f"## 📊 Kết quả: {score}/{total} câu đúng\n"]
+    for i, (q, a) in enumerate(zip(questions, answers), start=1):
+        correct = q["answer"]
+        is_correct = (a == correct)
+        icon = "✅" if is_correct else "❌"
+        lines.append(f"**Câu {i}: {q['question']}** {icon}")
+        for opt in q["options"]:
+            if opt == correct:
+                lines.append(f"- ✅ {opt}  *(Đáp án đúng)*")
+            elif opt == a:
+                lines.append(f"- ❌ {opt}  *(Bạn đã chọn)*")
+            else:
+                lines.append(f"-   {opt}")
+        lines.append("")
+
+    result_md = "\n".join(lines)
+
+    return (
+        answers,  # rp_answers_state
+        gr.update(visible=False),  # rp_question_panel
+        gr.update(visible=True),  # rp_result_panel
+        result_md,  # rp_result_md
+        gr.update(visible=False, value=""),  # rp_warning_md
+        gr.update(interactive=prev_interactive),  # rp_prev_btn
+        gr.update(visible=next_visible),  # rp_next_btn
+        gr.update(visible=submit_visible),  # rp_submit_btn
+    )
+
+
+def retry_reading_quiz(questions: list):
+    """Làm lại bài đọc hiện tại: reset đáp án + quay về câu 1."""
+    answers = [None] * len(questions)
+
+    (question_md, choices, radio_value, progress_md,
+     prev_interactive, next_visible, submit_visible) = _render_question(0, questions, answers)
+
+    return (
+        0,  # rp_current_index_state
+        answers,  # rp_answers_state
+        question_md,  # rp_question_md
+        gr.update(choices=choices, value=radio_value),  # rp_options_radio
+        progress_md,  # rp_progress_md
+        gr.update(interactive=prev_interactive),  # rp_prev_btn
+        gr.update(visible=next_visible),  # rp_next_btn
+        gr.update(visible=submit_visible),  # rp_submit_btn
+        gr.update(visible=True),  # rp_question_panel
+        gr.update(visible=False),  # rp_result_panel
+        gr.update(visible=False, value=""),  # rp_warning_md
+    )
