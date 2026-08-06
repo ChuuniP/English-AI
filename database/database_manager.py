@@ -85,6 +85,27 @@ CREATE TABLE IF NOT EXISTS writing_prompts (
 );
 CREATE INDEX IF NOT EXISTS idx_writing_prompts_difficulty ON writing_prompts(difficulty);
 CREATE INDEX IF NOT EXISTS idx_writing_prompts_topic_category ON writing_prompts(topic_category);
+
+-- 9. Bảng lưu lịch sử các bài Writing đã chấm (tab Writting)
+CREATE TABLE IF NOT EXISTS writing_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prompt_id INTEGER,
+    question_text TEXT NOT NULL,
+    difficulty TEXT,
+    task_type TEXT,
+    essay_content TEXT NOT NULL,
+    overall_score REAL,
+    task_response_score REAL,
+    coherence_score REAL,
+    lexical_score REAL,
+    grammar_score REAL,
+    feedback TEXT,
+    annotated_essay TEXT,
+    model_essay TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (prompt_id) REFERENCES writing_prompts(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_writing_history_created_at ON writing_history(created_at);
 """
 
 _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -781,8 +802,8 @@ class DatabaseManager:
         row = cur.fetchone()
         return dict(row) if row else None
 
-    def list_all_writing_prompts(self, difficulty: str = None, topic_category: str = None) -> list[dict]:
-        """Retrieve all writing prompts, optionally filtered by difficulty and/or topic_category."""
+    def list_all_writing_prompts(self, difficulty: str = None, topic_category: str = None, task_type: str = None) -> list[dict]:
+        """Retrieve all writing prompts, optionally filtered by difficulty, topic_category and/or task_type."""
         cur = self.conn.cursor()
         query = """
             SELECT id, task_type, topic_category, difficulty, question_text,
@@ -797,6 +818,9 @@ class DatabaseManager:
         if topic_category:
             conditions.append("topic_category = ?")
             params.append(topic_category)
+        if task_type:
+            conditions.append("task_type = ?")
+            params.append(task_type)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
@@ -812,6 +836,42 @@ class DatabaseManager:
             ORDER BY topic_category
         """)
         return [row["topic_category"] for row in cur.fetchall()]
+
+    def list_writing_topic_categories_by_difficulty(self, difficulty: str = None) -> list[str]:
+        """Retrieve the distinct topic_category values available for a given difficulty."""
+        cur = self.conn.cursor()
+        query = """
+            SELECT DISTINCT topic_category FROM writing_prompts
+            WHERE topic_category IS NOT NULL AND topic_category != ''
+        """
+        params = []
+        if difficulty:
+            query += " AND difficulty = ?"
+            params.append(difficulty)
+        query += " ORDER BY topic_category"
+        cur.execute(query, params)
+        return [row["topic_category"] for row in cur.fetchall()]
+
+    def list_writing_task_types_by_filters(self, difficulty: str = None, topic_category: str = None) -> list[str]:
+        """Retrieve the distinct task_type values available for a given difficulty + topic_category."""
+        cur = self.conn.cursor()
+        query = """
+            SELECT DISTINCT task_type FROM writing_prompts
+            WHERE task_type IS NOT NULL AND task_type != ''
+        """
+        conditions = []
+        params = []
+        if difficulty:
+            conditions.append("difficulty = ?")
+            params.append(difficulty)
+        if topic_category:
+            conditions.append("topic_category = ?")
+            params.append(topic_category)
+        if conditions:
+            query += " AND " + " AND ".join(conditions)
+        query += " ORDER BY task_type"
+        cur.execute(query, params)
+        return [row["task_type"] for row in cur.fetchall()]
 
     def update_writing_prompt(
             self,
@@ -851,6 +911,16 @@ class DatabaseManager:
         cur.execute("DELETE FROM writing_prompts WHERE id = ?", (prompt_id,))
         self.conn.commit()
 
+    def list_all_writing_task_types(self) -> list[str]:
+        """Retrieve the distinct list of task_type values in the writing_prompts table."""
+        cur = self.conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT task_type FROM writing_prompts
+            WHERE task_type IS NOT NULL AND task_type != ''
+            ORDER BY task_type
+        """)
+        return [row["task_type"] for row in cur.fetchall()]
+
     def get_random_writing_prompt(self, difficulty: str = None, topic_category: str = None) -> dict | None:
         """Retrieve one random writing prompt, optionally filtered by difficulty and/or topic_category."""
         cur = self.conn.cursor()
@@ -872,6 +942,69 @@ class DatabaseManager:
         query += " ORDER BY RANDOM() LIMIT 1"
 
         cur.execute(query, params)
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    # --- WRITING HISTORY MANAGEMENT ---
+
+    def add_writing_history(
+            self,
+            question_text: str,
+            essay_content: str,
+            prompt_id: int = None,
+            difficulty: str = None,
+            task_type: str = None,
+            overall_score: float = None,
+            task_response_score: float = None,
+            coherence_score: float = None,
+            lexical_score: float = None,
+            grammar_score: float = None,
+            feedback: str = None,
+            annotated_essay: str = None,
+            model_essay: str = None,
+    ) -> int:
+        """Lưu 1 bản ghi kết quả bài Writing đã chấm vào lịch sử. Trả về history_id."""
+        if not question_text or not essay_content:
+            raise ValueError("question_text và essay_content không được để trống!")
+
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO writing_history (
+                prompt_id, question_text, difficulty, task_type, essay_content,
+                overall_score, task_response_score, coherence_score, lexical_score, grammar_score,
+                feedback, annotated_essay, model_essay, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            prompt_id, question_text, difficulty, task_type, essay_content,
+            overall_score, task_response_score, coherence_score, lexical_score, grammar_score,
+            feedback, annotated_essay, model_essay,
+            datetime.datetime.now().isoformat(timespec="seconds"),
+        ))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_writing_history(self, limit: int = 50) -> list[dict]:
+        """Lấy danh sách các bài Writing đã lưu vào lịch sử, mới nhất trước."""
+        cur = self.conn.cursor()
+        cur.execute("""
+            SELECT id, prompt_id, question_text, difficulty, task_type, essay_content,
+                   overall_score, task_response_score, coherence_score, lexical_score, grammar_score,
+                   feedback, annotated_essay, model_essay, created_at
+            FROM writing_history
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,))
+        return [dict(row) for row in cur.fetchall()]
+
+    def get_writing_history_entry(self, history_id: int) -> dict | None:
+        """Lấy 1 bản ghi lịch sử Writing theo id."""
+        cur = self.conn.cursor()
+        cur.execute("""
+            SELECT id, prompt_id, question_text, difficulty, task_type, essay_content,
+                   overall_score, task_response_score, coherence_score, lexical_score, grammar_score,
+                   feedback, annotated_essay, model_essay, created_at
+            FROM writing_history WHERE id = ?
+        """, (history_id,))
         row = cur.fetchone()
         return dict(row) if row else None
 

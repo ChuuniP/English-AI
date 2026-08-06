@@ -1099,10 +1099,16 @@ with gr.Blocks() as demo:
             # --- TAB 6: WRITING ---
             with gr.Column(visible=False) as view_write:
                 with gr.Tabs():
-                    with gr.Tab("Writting"):
+                    with gr.Tab("Writting") as writting_subtab:
+                        # --- State & Timer dùng riêng cho tab Writting ---
+                        writing_candidate_prompt_state = gr.State(None)   # đề đang chọn ở Panel 1
+                        writing_current_prompt_state = gr.State(None)     # đề đang viết ở Panel 2 / 3
+                        writing_elapsed_state = gr.State(0)               # số giây đã trôi qua
+                        writing_last_result_state = gr.State(None)        # kết quả chấm gần nhất
+                        writing_timer_tick = gr.Timer(1, active=False)    # tick mỗi giây khi đang viết bài
 
                         # ==================================================
-                        # PANEL 1 — SETUP SCREEN: chọn đề (chưa xử lý logic)
+                        # PANEL 1 — SETUP SCREEN: chọn đề (chọn tuần tự: Độ khó -> Chủ đề -> Dạng bài -> Đề tài)
                         # ==================================================
                         with gr.Column(visible=True) as start_writing_panel:
                             gr.Markdown("### ✍️ Chọn đề Writing")
@@ -1111,32 +1117,30 @@ with gr.Blocks() as demo:
                                 writing_difficulty_radio = gr.Radio(
                                     label="Độ khó",
                                     choices=["Beginner", "Intermediate", "Advanced"],
-                                    value="",
+                                    value=None,
                                 )
                                 writing_topic_dropdown = gr.Dropdown(
                                     label="Chủ đề",
-                                    choices=[],  # sẽ đổ dữ liệu từ DB sau
-                                    value="",
-                                    interactive=True,
+                                    choices=[],  # đổ dữ liệu sau khi chọn Độ khó
+                                    value=None,
+                                    interactive=False,
                                 )
                                 writing_task_type_dropdown = gr.Dropdown(
                                     label="Dạng bài",
-                                    choices=[],  # sẽ đổ dữ liệu từ DB sau
-                                    value="",
-                                    interactive=True,
+                                    choices=[],  # đổ dữ liệu sau khi chọn Chủ đề
+                                    value=None,
+                                    interactive=False,
                                 )
 
-                            writing_prompt_preview_md = gr.Markdown(
-                                "*Đề bài xem trước sẽ hiển thị tại đây sau khi chọn hoặc random.*",
-                                elem_id="writing-prompt-preview",
+                            writing_prompt_radio = gr.Radio(
+                                label="Chọn đề tài",
+                                choices=[],
+                                value=None,
+                                visible=False,
+                                elem_id="writing-prompt-radio",
                             )
 
                             with gr.Row():
-                                random_writing_btn = gr.Button(
-                                    "🎲 Random đề",
-                                    variant="secondary",
-                                    scale=1,
-                                )
                                 start_writing_btn = gr.Button(
                                     "▶️ Bắt đầu viết",
                                     variant="primary",
@@ -1216,8 +1220,140 @@ with gr.Blocks() as demo:
 
                             with gr.Row():
                                 retry_writing_btn = gr.Button("🔁 Viết lại đề này", variant="secondary", scale=1)
-                                next_writing_btn = gr.Button("➡️ Đề tiếp theo", variant="secondary", scale=1)
+                                back_to_selection_writing_btn = gr.Button("⬅️ Trở lại chọn đề", variant="secondary", scale=1)
                                 save_history_writing_btn = gr.Button("📌 Lưu vào lịch sử", variant="primary", scale=1)
+
+                        # ==================================================
+                        # SỰ KIỆN — nối tất cả nút/thay đổi (đặt sau khi mọi
+                        # component của 3 Panel đã được khai báo xong)
+                        # ==================================================
+
+                        # --- Mở tab Writting -> chỉ Độ khó khả dụng, khoá Chủ đề/Dạng bài ---
+                        writting_subtab.select(
+                            fn=lambda: wm.load_writing_filters(db),
+                            outputs=[
+                                writing_topic_dropdown, writing_task_type_dropdown, writing_prompt_radio,
+                                writing_candidate_prompt_state,
+                            ],
+                        )
+
+                        # --- Chọn/đổi Độ khó -> mở khoá Chủ đề (chỉ hiện chủ đề có ở độ khó này),
+                        #     đồng thời reset Dạng bài + danh sách đề tài (chọn lại từ đầu) ---
+                        writing_difficulty_radio.change(
+                            fn=lambda d: wm.on_difficulty_change(db, d),
+                            inputs=[writing_difficulty_radio],
+                            outputs=[
+                                writing_topic_dropdown, writing_task_type_dropdown, writing_prompt_radio,
+                                writing_candidate_prompt_state,
+                            ],
+                        )
+
+                        # --- Chọn Chủ đề -> mở khoá Dạng bài (chỉ hiện dạng bài có ở Độ khó + Chủ đề này) ---
+                        writing_topic_dropdown.change(
+                            fn=lambda d, t: wm.on_topic_change(db, d, t),
+                            inputs=[writing_difficulty_radio, writing_topic_dropdown],
+                            outputs=[
+                                writing_task_type_dropdown, writing_prompt_radio,
+                                writing_candidate_prompt_state,
+                            ],
+                        )
+
+                        # --- Chọn Dạng bài (đủ cả 3) -> hiện danh sách TẤT CẢ đề tài khớp,
+                        #     mặc định chọn sẵn đề tài đầu tiên ---
+                        writing_task_type_dropdown.change(
+                            fn=lambda d, t, tt: wm.on_task_type_change(db, d, t, tt),
+                            inputs=[writing_difficulty_radio, writing_topic_dropdown, writing_task_type_dropdown],
+                            outputs=[writing_prompt_radio, writing_candidate_prompt_state],
+                        )
+
+                        # --- Người dùng bấm chọn 1 đề tài cụ thể trong danh sách ---
+                        # Lấy thẳng theo id từ DB (không dựa vào state trung gian) để tránh
+                        # xung đột với sự kiện change() tự kích hoạt khi on_task_type_change
+                        # set value cho writing_prompt_radio bằng code.
+                        writing_prompt_radio.change(
+                            fn=lambda selected_id: wm.on_prompt_select(db, selected_id),
+                            inputs=[writing_prompt_radio],
+                            outputs=[writing_candidate_prompt_state],
+                        )
+
+                        # --- Bắt đầu viết (Panel 1 -> Panel 2) ---
+                        start_writing_btn.click(
+                            fn=wm.start_writing,
+                            inputs=[writing_candidate_prompt_state],
+                            outputs=[
+                                start_writing_panel, content_writing_panel, respond_writing_panel,
+                                writing_badge_md, writing_timer_md, writing_wordcount_md,
+                                writing_prompt_md, writing_background_info_md,
+                                writing_textbox, writing_current_prompt_state,
+                                writing_elapsed_state, writing_timer_tick,
+                            ],
+                        )
+
+                        # --- Đếm từ khi gõ bài ---
+                        writing_textbox.change(
+                            fn=wm.on_writing_text_change,
+                            inputs=[writing_textbox, writing_current_prompt_state],
+                            outputs=[writing_wordcount_md],
+                            show_progress="hidden",
+                        )
+
+                        # --- Đồng hồ đếm giờ (tick mỗi giây) ---
+                        writing_timer_tick.tick(
+                            fn=wm.tick_writing_timer,
+                            inputs=[writing_elapsed_state],
+                            outputs=[writing_timer_md, writing_elapsed_state],
+                            show_progress="hidden",
+                        )
+
+                        # --- Lưu nháp ---
+                        save_draft_writing_btn.click(
+                            fn=wm.save_writing_draft,
+                            inputs=[writing_textbox],
+                            outputs=[],
+                        )
+
+                        # --- Đổi đề khác (Panel 2 -> Panel 1) ---
+                        change_writing_btn.click(
+                            fn=wm.change_writing_topic,
+                            outputs=[start_writing_panel, content_writing_panel, respond_writing_panel, writing_timer_tick],
+                        )
+
+                        # --- Nộp bài (Panel 2 -> Panel 3, chấm bằng Gemini) ---
+                        submit_writing_btn.click(
+                            fn=partial(wm.submit_writing, client=client),
+                            inputs=[writing_textbox, writing_current_prompt_state],
+                            outputs=[
+                                content_writing_panel, respond_writing_panel, writing_timer_tick,
+                                result_overall_score_md, score_task_response, score_coherence,
+                                score_lexical, score_grammar_writing,
+                                result_annotated_essay_html, result_feedback_md,
+                                writing_last_result_state,
+                            ],
+                        )
+
+                        # --- Viết lại đề này (Panel 3 -> Panel 2, giữ nguyên đề) ---
+                        retry_writing_btn.click(
+                            fn=wm.retry_writing,
+                            inputs=[writing_current_prompt_state],
+                            outputs=[
+                                content_writing_panel, respond_writing_panel,
+                                writing_textbox, writing_timer_md, writing_wordcount_md,
+                                writing_elapsed_state, writing_timer_tick,
+                            ],
+                        )
+
+                        # --- Trở lại chọn đề (Panel 3 -> Panel 1) ---
+                        back_to_selection_writing_btn.click(
+                            fn=wm.change_writing_topic,
+                            outputs=[start_writing_panel, content_writing_panel, respond_writing_panel, writing_timer_tick],
+                        )
+
+                        # --- Lưu kết quả vào lịch sử ---
+                        save_history_writing_btn.click(
+                            fn=lambda result: wm.save_writing_history(db, result),
+                            inputs=[writing_last_result_state],
+                            outputs=[],
+                        )
                     with gr.Tab("Personal"):
                         with gr.Row(elem_id="writing-tab-row", equal_height=False):
                             with gr.Column(scale=1):
