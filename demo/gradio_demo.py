@@ -624,6 +624,180 @@ with gr.Blocks() as demo:
                             ]
                         )
 
+                    with gr.Tab("Sentence") as sentence_tab:
+                        state_sentences_data = gr.State([])
+                        state_current_sentence_index = gr.State(0)
+
+                        with gr.Column():
+                            with gr.Row():
+                                sentence_text = gr.HTML(
+                                    value=sm.render_single_sentence_md(
+                                        {"sentence": "Something Inside But I Don't Know", "meaning": ""}
+                                    ),
+                                    elem_classes=["sentence-box"],
+                                )
+                            with gr.Row():
+                                sentence_sample_audio = gr.Audio(
+                                    label="🔊 Nghe phát âm mẫu",
+                                    type="filepath",
+                                    interactive=False,
+                                )
+                            with gr.Row():
+                                btn_random_sentence = gr.Button("🔀 Đổi câu ngẫu nhiên", variant="secondary", scale=1)
+                                record_sentence_html = gr.HTML(
+                                    """
+                                    <div style="display:flex;justify-content:center;">
+                                        <button class="record-btn" data-target="hidden-audio-recorder-sentence">
+                                            🎤 Record
+                                        </button>
+                                    </div>
+                                    """,
+                                    scale=2,
+                                )
+                                gr.HTML("<style>#hidden-audio-recorder-sentence{display:none !important;}</style>")
+                                sentence_audio_recorder = gr.File(
+                                    visible=True,
+                                    elem_id="hidden-audio-recorder-sentence",
+                                    type="filepath",
+                                )
+
+                            with gr.Row():
+                                sentence_feedback_md = gr.HTML(value="")
+
+                        btn_random_sentence.click(
+                            fn=lambda: sm.process_random_speaking_sentences(db),
+                            inputs=[],
+                            outputs=[
+                                sentence_text,
+                                sentence_sample_audio,
+                                state_sentences_data,
+                                state_current_sentence_index,
+                                sentence_feedback_md
+                            ]
+                        )
+
+                        # 2. Xử lý khi ghi âm xong (audio_recorder thay đổi giá trị)
+                        sentence_audio_recorder.change(
+                            fn=lambda x, idx, sentences, html: sm.handle_sentence_record_action(
+                                wav2vec2_processor, wav2vec2_model, device, x, idx, sentences, html
+                            ),
+                            inputs=[
+                                sentence_audio_recorder,
+                                state_current_sentence_index,
+                                state_sentences_data,
+                                sentence_text
+                            ],
+                            outputs=[sentence_feedback_md, sentence_audio_recorder]
+                        )
+
+                        # 3. Tự động load 1 câu ngẫu nhiên ngay khi người dùng bấm vào tab
+                        #    (thay cho câu placeholder "Something Inside But I Don't Know")
+                        sentence_tab.select(
+                            fn=lambda: sm.process_random_speaking_sentences(db),
+                            inputs=[],
+                            outputs=[
+                                sentence_text,
+                                sentence_sample_audio,
+                                state_sentences_data,
+                                state_current_sentence_index,
+                                sentence_feedback_md
+                            ]
+                        )
+
+                    with gr.Tab("1 minute") as _1minute_tab:
+                        state_1minute_topic = gr.State({})
+                        with gr.Row() as start_1minute_panel:
+                            gr.Markdown("")  # spacer trái
+                            start_1minute_btn = gr.Button(
+                                "▶️ Bắt đầu",
+                                variant="primary",
+                                scale=0,
+                                min_width=160,
+                            )
+                            gr.Markdown("")
+
+                        with gr.Row() as topic_1minute_panel:
+                            topic_1minute_text = gr.Markdown(
+                                "Topic: Say something",
+                                elem_id="topic-1minute-card",
+                            )
+
+                        with gr.Row() as btn_1minute_panel:
+                            random_1minute_btn = gr.Button("🔀 Đổi câu ngẫu nhiên", variant="secondary", scale=1)
+                            with gr.Column(scale=2):
+                                record_1minute_html = gr.HTML(
+                                    """
+                                    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+                                        <button class="record-btn"
+                                                data-target="hidden-audio-recorder-1minute"
+                                                data-seconds="60">
+                                            🎤 Record
+                                        </button>
+                                        <span class="record-timer" data-target="hidden-audio-recorder-1minute">01:00</span>
+                                        <span class="record-status" data-target="hidden-audio-recorder-1minute"
+                                              style="font-size:13px;color:#666;"></span>
+                                    </div>
+                                    """
+                                )
+
+                        # FIX: đổi elem_id riêng, không trùng với tab Sentence
+                        gr.HTML("<style>#hidden-audio-recorder-1minute{display:none !important;}</style>")
+
+                        onemin_audio_recorder = gr.File(
+                            visible=True,
+                            elem_id="hidden-audio-recorder-1minute",
+                            type="filepath",
+                        )
+
+
+                        with gr.Row() as respond_1minute_panel:
+                            with gr.Column():
+                                with gr.Row():
+                                    gr.Markdown("---")
+                                    result_1minute_summary = gr.Markdown()
+                                with gr.Row():
+                                    pron_1minute_out = gr.Markdown(label="Phát âm")
+                                    gram_1minute_out = gr.Markdown(label="Ngữ pháp")
+                                    vocab_1minute_out = gr.Markdown(label="Từ vựng")
+                                with gr.Row():
+                                    transcript_1minute_out = gr.Textbox(label="Transcript", interactive=False)
+
+                        _1minute_tab.select(
+                            fn=sm.show_1minute_start_panel,
+                            inputs=[],
+                            outputs=[start_1minute_panel, topic_1minute_panel, btn_1minute_panel, respond_1minute_panel]
+                        )
+
+                        start_1minute_btn.click(
+                            fn=lambda: sm.start_1minute_practice(db),
+                            inputs=[],
+                            outputs=[start_1minute_panel, topic_1minute_panel, btn_1minute_panel,
+                                     respond_1minute_panel, topic_1minute_text, state_1minute_topic]
+                        )
+
+                        random_1minute_btn.click(
+                            fn=lambda: sm.change_1minute_topic(db),
+                            inputs=[],
+                            outputs=[topic_1minute_text, state_1minute_topic, respond_1minute_panel]
+                        )
+
+                        onemin_audio_recorder.change(
+                            fn=lambda audio_path, topic_obj: sm.handle_1minute_record_action(
+                                client, model_whisper, wav2vec2_processor, wav2vec2_model, device,
+                                audio_path, topic_obj
+                            ),
+                            inputs=[onemin_audio_recorder, state_1minute_topic],
+                            outputs=[
+                                respond_1minute_panel,
+                                result_1minute_summary,
+                                transcript_1minute_out,
+                                pron_1minute_out,
+                                gram_1minute_out,
+                                vocab_1minute_out,
+                                onemin_audio_recorder,
+                            ]
+                        )
+
                     with gr.Tab("Practice"):
                         with gr.Row():
                             with gr.Column(scale=3):
@@ -685,184 +859,272 @@ with gr.Blocks() as demo:
             # --- TAB 5: READING ---
             cached_reading_text = gr.State(value="")
             with gr.Column(visible=False) as view_read:
-                with gr.Row():
-                    with gr.Column(scale=3):
-                        with gr.Accordion("🛠️ Tùy chỉnh giao diện đọc", open=False):
+                with gr.Tabs():
+                    with gr.Tab("Reading"):
+                        with gr.Column():
+                            topic_reading_dropdown = gr.Dropdown(
+                                label="Topic",
+                                choices=[],
+                                value="",
+                                interactive=True,
+                            )
+                            gr.Markdown("")
+                            start_reading_btn = gr.Button(
+                                "▶️ Bắt đầu",
+                                variant="primary",
+                                scale=0,
+                                min_width=160,
+                            )
+                            gr.Markdown("")
+                        with gr.Column(visible=True) as content_reading_panel:
                             with gr.Row():
-                                font_family_opt = gr.Dropdown(
-                                    choices=["Serif (Có chân)", "Sans-serif (Không chân)", "Monospace (Đơn cách)"],
-                                    value="Serif (Có chân)",
-                                    label="Font chữ"
+                                reading_title_md = gr.Markdown()  # tiêu đề bài đọc
+                                reading_passage_md = gr.Markdown(
+                                    elem_id="reading-zone-active",
+                                    # khớp id mà selection_listener.js đang lắng nghe để tra từ
                                 )
-                                font_size_opt = gr.Dropdown(
-                                    choices=["14px", "16px", "18px", "20px", "22px"],
-                                    value="16px",
-                                    label="Kích thước chữ"
-                                )
+
                             with gr.Row():
-                                bg_color_opt = gr.Dropdown(
-                                    choices=["Giấy cổ (Mặc định)", "Trắng tinh", "Chế độ tối (Dark mode)",
-                                             "Xanh mint dịu mắt"],
-                                    value="Giấy cổ (Mặc định)",
-                                    label="Màu nền bảo vệ mắt"
+                                change_reading_btn = gr.Button("🔀 Đổi bài khác", variant="secondary", scale=1)
+
+                            gr.Markdown("---")
+                            gr.Markdown("### ❓ Câu hỏi")
+                            reading_questions_group = gr.Radio(
+                                choices=[],  # sẽ đổ đáp án theo từng câu hỏi
+                                label="",
+                                interactive=True,
+                            )
+                            submit_answer_btn = gr.Button("✅ Nộp bài", variant="primary")
+                            reading_result_md = gr.Markdown(visible=False)
+                    with gr.Tab("Personal"):
+                        with gr.Row():
+                            with gr.Column(scale=3):
+                                with gr.Accordion("🛠️ Tùy chỉnh giao diện đọc", open=False):
+                                    with gr.Row():
+                                        font_family_opt = gr.Dropdown(
+                                            choices=["Serif (Có chân)", "Sans-serif (Không chân)", "Monospace (Đơn cách)"],
+                                            value="Serif (Có chân)",
+                                            label="Font chữ"
+                                        )
+                                        font_size_opt = gr.Dropdown(
+                                            choices=["14px", "16px", "18px", "20px", "22px"],
+                                            value="16px",
+                                            label="Kích thước chữ"
+                                        )
+                                    with gr.Row():
+                                        bg_color_opt = gr.Dropdown(
+                                            choices=["Giấy cổ (Mặc định)", "Trắng tinh", "Chế độ tối (Dark mode)",
+                                                     "Xanh mint dịu mắt"],
+                                            value="Giấy cổ (Mặc định)",
+                                            label="Màu nền bảo vệ mắt"
+                                        )
+                                        text_color_opt = gr.Dropdown(
+                                            choices=["Xanh mực (Mặc định)", "Xám đậm", "Trắng sáng (Cho nền tối)",
+                                                     "Xanh đại dương"],
+                                            value="Xanh mực (Mặc định)",
+                                            label="Màu chữ"
+                                        )
+                                file_uploader = gr.File(
+                                    label="Upload File",
+                                    file_types=[".txt"],
+                                    file_count="single"
                                 )
-                                text_color_opt = gr.Dropdown(
-                                    choices=["Xanh mực (Mặc định)", "Xám đậm", "Trắng sáng (Cho nền tối)",
-                                             "Xanh đại dương"],
-                                    value="Xanh mực (Mặc định)",
-                                    label="Màu chữ"
+                                reading_display = gr.HTML(
+                                    value="<div class='reading-area'><p class='reading-paragraph' style='color: var(--slate); font-style: italic;'>Vui lòng tải lên một file .txt để bắt đầu đọc...</p></div>"
                                 )
-                        file_uploader = gr.File(
-                            label="Upload File",
-                            file_types=[".txt"],
-                            file_count="single"
-                        )
-                        reading_display = gr.HTML(
-                            value="<div class='reading-area'><p class='reading-paragraph' style='color: var(--slate); font-style: italic;'>Vui lòng tải lên một file .txt để bắt đầu đọc...</p></div>"
-                        )
 
-                    with gr.Column(scale=1):
-                        gr.Markdown("#### 🔍 Trợ Lý Tra Từ Nhanh")
-                        selected_word_txt = gr.Textbox(
-                            label="Từ vựng vừa chọn",
-                            interactive=False,
-                            placeholder="Bôi đen một từ bên khung đọc...",
-                            elem_id="selected_word_txt"
-                        )
+                            with gr.Column(scale=1):
+                                gr.Markdown("#### 🔍 Trợ Lý Tra Từ Nhanh")
+                                selected_word_txt = gr.Textbox(
+                                    label="Từ vựng vừa chọn",
+                                    interactive=False,
+                                    placeholder="Bôi đen một từ bên khung đọc...",
+                                    elem_id="selected_word_txt"
+                                )
 
-                        hidden_trigger = gr.Textbox(visible=False, elem_id="hidden_trigger_vocab")
+                                hidden_trigger = gr.Textbox(visible=False, elem_id="hidden_trigger_vocab")
 
-                        translated_word = gr.Textbox(
-                            label="Word Meaning",
-                            interactive=False,
-                            lines=3
-                        )
+                                translated_word = gr.Textbox(
+                                    label="Word Meaning",
+                                    interactive=False,
+                                    lines=3
+                                )
 
-                        ceft_word = gr.Textbox(
-                            label="CEFT",
-                            interactive=False
-                        )
+                                ceft_word = gr.Textbox(
+                                    label="CEFT",
+                                    interactive=False
+                                )
 
-                        phonetic_word = gr.Textbox(
-                            label="Phiên âm (IPA)",
-                            interactive=False,
-                            placeholder="/.../"
-                        )
+                                phonetic_word = gr.Textbox(
+                                    label="Phiên âm (IPA)",
+                                    interactive=False,
+                                    placeholder="/.../"
+                                )
 
-                        add_fsrs_btn = gr.Button("➕ Save to FSRS", variant="primary")
-                        save_status_lbl = gr.Markdown(value="", elem_id="save-status-container")
+                                add_fsrs_btn = gr.Button("➕ Save to FSRS", variant="primary")
+                                save_status_lbl = gr.Markdown(value="", elem_id="save-status-container")
 
-                    config_inputs = [file_uploader, font_family_opt, font_size_opt, bg_color_opt, text_color_opt]
+                            config_inputs = [file_uploader, font_family_opt, font_size_opt, bg_color_opt, text_color_opt]
 
-                    file_uploader.change(
-                        fn=rm.handle_file_upload,
-                        inputs=config_inputs,
-                        outputs=[cached_reading_text, reading_display],
-                    )
+                            file_uploader.change(
+                                fn=rm.handle_file_upload,
+                                inputs=config_inputs,
+                                outputs=[cached_reading_text, reading_display],
+                            )
 
-                    ui_change_inputs = [cached_reading_text, font_family_opt, font_size_opt, bg_color_opt, text_color_opt]
+                            ui_change_inputs = [cached_reading_text, font_family_opt, font_size_opt, bg_color_opt, text_color_opt]
 
-                    font_family_opt.change(fn=rm.render_html_reading_zone, inputs=ui_change_inputs, outputs=reading_display)
-                    font_size_opt.change(fn=rm.render_html_reading_zone, inputs=ui_change_inputs, outputs=reading_display)
-                    bg_color_opt.change(fn=rm.render_html_reading_zone, inputs=ui_change_inputs, outputs=reading_display)
-                    text_color_opt.change(fn=rm.render_html_reading_zone, inputs=ui_change_inputs, outputs=reading_display)
+                            font_family_opt.change(fn=rm.render_html_reading_zone, inputs=ui_change_inputs, outputs=reading_display)
+                            font_size_opt.change(fn=rm.render_html_reading_zone, inputs=ui_change_inputs, outputs=reading_display)
+                            bg_color_opt.change(fn=rm.render_html_reading_zone, inputs=ui_change_inputs, outputs=reading_display)
+                            text_color_opt.change(fn=rm.render_html_reading_zone, inputs=ui_change_inputs, outputs=reading_display)
 
-                    hidden_trigger.change(
-                        fn=lambda x: x,
-                        inputs=[hidden_trigger],
-                        outputs=selected_word_txt
-                    )
+                            hidden_trigger.change(
+                                fn=lambda x: x,
+                                inputs=[hidden_trigger],
+                                outputs=selected_word_txt
+                            )
 
-                    selected_word_txt.change(
-                        fn=lambda text: rm.translate_and_get_cefr_with_excel(CEFR_DICT, translator, lemmatizer, text),
-                        inputs=[selected_word_txt],
-                        outputs=[translated_word, ceft_word, phonetic_word]
-                    )
+                            selected_word_txt.change(
+                                fn=lambda text: rm.translate_and_get_cefr_with_excel(CEFR_DICT, translator, lemmatizer, text),
+                                inputs=[selected_word_txt],
+                                outputs=[translated_word, ceft_word, phonetic_word]
+                            )
 
-                    add_fsrs_btn.click(
-                        fn=lambda w, c, m, p: rm.add_new_word_to_db_no_ui_update(CEFR_DICT, lemmatizer, w, c, m, p),
-                        inputs=[selected_word_txt, ceft_word, translated_word, phonetic_word],
-                        outputs=[*vocab_outputs, fsrs_buttons_row, save_status_lbl],
-                        show_progress="hidden"
-                    )
+                            add_fsrs_btn.click(
+                                fn=lambda w, c, m, p: rm.add_new_word_to_db_no_ui_update(CEFR_DICT, lemmatizer, w, c, m, p),
+                                inputs=[selected_word_txt, ceft_word, translated_word, phonetic_word],
+                                outputs=[*vocab_outputs, fsrs_buttons_row, save_status_lbl],
+                                show_progress="hidden"
+                            )
 
             # --- TAB 6: WRITING ---
             with gr.Column(visible=False) as view_write:
-                with gr.Row(elem_id="writing-tab-row", equal_height=False):
-                    with gr.Column(scale=1):
-                        essay_topic = gr.Textbox(
-                            label="Essay Topic / Prompt",
-                            placeholder="e.g., Some people think that robots are important for...",
-                            lines=2
-                        )
-                        essay_content = gr.Textbox(
-                            label="Your Essay",
-                            placeholder="Start typing your essay here...",
-                            lines=18,
-                            max_length=2500
-                        )
-                        submit_btn = gr.Button("Submit for Evaluation", variant="primary")
+                with gr.Tabs():
+                    with gr.Tab("Writting"):
+                        with gr.Row() as start_writing_panel:
+                            with gr.Column():
+                                gr.Markdown("### ✍️ Chọn đề Writing")
+                                writing_dropdown = gr.Dropdown(
+                                    label="Chủ đề",
+                                    choices=[],  # sẽ đổ dữ liệu từ DB sau
+                                    value=None,
+                                    interactive=True,
+                                )
+                                start_writing_btn = gr.Button(
+                                    "▶️ Bắt đầu",
+                                    variant="primary",
+                                    scale=0,
+                                    min_width=160,
+                                )
 
-                    with gr.Column(scale=1, min_width=320, variant="panel", elem_id="writing-summary-panel"):
-                        with gr.Group():
-                            gr.Markdown("### 📊 Evaluation Summary")
+                        # ---- Panel 2: đề bài + khung viết bài (ẩn ban đầu) ----
+                        with gr.Row(visible=False) as content_writing_panel:
+                            with gr.Column():
+                                writing_prompt_md = gr.Markdown(
+                                    elem_id="writing-prompt-card",
+                                )
 
-                            with gr.Row(elem_id="score-summary-container"):
-                                with gr.Column(scale=1, min_width=110):
-                                    total_band_display = gr.HTML(
-                                        value="""
-                                                <div class="band-seal">
-                                                    <div class="band-ring" style="--pct: 0;">
-                                                        <div class="band-ring-inner">
-                                                            <span class="band-number">--</span>
+                                with gr.Row():
+                                    writing_min_words_md = gr.Markdown()  # "Số từ tối thiểu: 250 từ"
+                                    writing_time_md = gr.Markdown()  # "Thời gian: 30 phút"
+
+                                writing_textbox = gr.Textbox(
+                                    label="Bài viết của bạn",
+                                    placeholder="Nhập bài viết của bạn tại đây...",
+                                    lines=12,
+                                )
+                                writing_wordcount_md = gr.Markdown("0 từ")
+
+                                with gr.Row():
+                                    change_writing_btn = gr.Button("🔀 Đổi đề khác", variant="secondary", scale=1)
+                                    submit_writing_btn = gr.Button("✅ Nộp bài", variant="primary", scale=1)
+
+                        # ---- Panel 3: kết quả chấm bài (ẩn ban đầu) ----
+                        with gr.Row(visible=False) as respond_writing_panel:
+                            with gr.Column():
+                                gr.Markdown("---")
+                                result_writing_summary = gr.Markdown()  # nhận xét tổng quan + điểm
+                                with gr.Row():
+                                    grammar_writing_out = gr.Markdown(label="Ngữ pháp")
+                                    vocab_writing_out = gr.Markdown(label="Từ vựng")
+                                    structure_writing_out = gr.Markdown(label="Bố cục")
+                    with gr.Tab("Personal"):
+                        with gr.Row(elem_id="writing-tab-row", equal_height=False):
+                            with gr.Column(scale=1):
+                                essay_topic = gr.Textbox(
+                                    label="Essay Topic / Prompt",
+                                    placeholder="e.g., Some people think that robots are important for...",
+                                    lines=2
+                                )
+                                essay_content = gr.Textbox(
+                                    label="Your Essay",
+                                    placeholder="Start typing your essay here...",
+                                    lines=18,
+                                    max_length=2500
+                                )
+                                submit_btn = gr.Button("Submit for Evaluation", variant="primary")
+
+                            with gr.Column(scale=1, min_width=320, variant="panel", elem_id="writing-summary-panel"):
+                                with gr.Group():
+                                    gr.Markdown("### 📊 Evaluation Summary")
+
+                                    with gr.Row(elem_id="score-summary-container"):
+                                        with gr.Column(scale=1, min_width=110):
+                                            total_band_display = gr.HTML(
+                                                value="""
+                                                        <div class="band-seal">
+                                                            <div class="band-ring" style="--pct: 0;">
+                                                                <div class="band-ring-inner">
+                                                                    <span class="band-number">--</span>
+                                                                </div>
+                                                            </div>
+                                                            <span class="band-caption">Estimated Band</span>
                                                         </div>
-                                                    </div>
-                                                    <span class="band-caption">Estimated Band</span>
+                                                        """
+                                            )
+
+                                        with gr.Column(scale=3, min_width=220):
+                                            with gr.Row():
+                                                score_cohesion = gr.Label(label="Cohesion", value="0/5", min_width=60)
+                                                score_syntax = gr.Label(label="Syntax", value="0/5", min_width=60)
+                                                score_vocab = gr.Label(label="Vocabulary", value="0/5", min_width=60)
+                                            with gr.Row():
+                                                score_phraseology = gr.Label(label="Phraseology", value="0/5",
+                                                                             min_width=60)
+                                                score_grammar = gr.Label(label="Grammar", value="0/5", min_width=60)
+                                                score_conventions = gr.Label(label="Conventions", value="0/5",
+                                                                             min_width=60)
+
+                                with gr.Group():
+                                    gr.Markdown("### 💡 AI Feedback & Corrections")
+
+                                    essay_feedback_display = gr.HTML(
+                                        value="""
+                                                <div class="feedback-card feedback-container feedback-empty">
+                                                    <p class="feedback-empty-text">Kết quả nhận xét và sửa lỗi chi tiết từ AI sẽ hiển thị tại đây...</p>
                                                 </div>
                                                 """
                                     )
 
-                                with gr.Column(scale=3, min_width=220):
-                                    with gr.Row():
-                                        score_cohesion = gr.Label(label="Cohesion", value="0/5", min_width=60)
-                                        score_syntax = gr.Label(label="Syntax", value="0/5", min_width=60)
-                                        score_vocab = gr.Label(label="Vocabulary", value="0/5", min_width=60)
-                                    with gr.Row():
-                                        score_phraseology = gr.Label(label="Phraseology", value="0/5",
-                                                                     min_width=60)
-                                        score_grammar = gr.Label(label="Grammar", value="0/5", min_width=60)
-                                        score_conventions = gr.Label(label="Conventions", value="0/5",
-                                                                     min_width=60)
+                        result_output = gr.Markdown()
 
-                        with gr.Group():
-                            gr.Markdown("### 💡 AI Feedback & Corrections")
-
-                            essay_feedback_display = gr.HTML(
-                                value="""
-                                        <div class="feedback-card feedback-container feedback-empty">
-                                            <p class="feedback-empty-text">Kết quả nhận xét và sửa lỗi chi tiết từ AI sẽ hiển thị tại đây...</p>
-                                        </div>
-                                        """
-                            )
-
-                result_output = gr.Markdown()
-
-                submit_btn.click(
-                    fn=lambda content: wm.handle_essay_scoring(
-                        content,
-                        essay_scoring_tokenizer,
-                        essay_scoring_model,
-                        ESSAY_MAX_LEN,
-                        ESSAY_SCORE_MIN,
-                        ESSAY_SCORE_MAX,
-                        ESSAY_SCORING_COLUMNS,
-                        device,
-                        client
-                    ),
-                    inputs=[essay_content],
-                    outputs=[total_band_display, score_cohesion, score_syntax, score_vocab,
-                             score_phraseology, score_grammar, score_conventions, essay_feedback_display]
-                )
+                        submit_btn.click(
+                            fn=lambda content: wm.handle_essay_scoring(
+                                content,
+                                essay_scoring_tokenizer,
+                                essay_scoring_model,
+                                ESSAY_MAX_LEN,
+                                ESSAY_SCORE_MIN,
+                                ESSAY_SCORE_MAX,
+                                ESSAY_SCORING_COLUMNS,
+                                device,
+                                client
+                            ),
+                            inputs=[essay_topic, essay_content],
+                            outputs=[total_band_display, score_cohesion, score_syntax, score_vocab,
+                                     score_phraseology, score_grammar, score_conventions, essay_feedback_display]
+                        )
 
     # --- ĐIỀU HƯỚNG TAB ---
     # Mỗi tab gồm: (view tương ứng, nút sidebar tương ứng)

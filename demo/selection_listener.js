@@ -6,7 +6,11 @@ document.addEventListener("touchend", handleSelectionChange);
 
 function handleSelectionChange() {
     // Tìm khung đọc sách đang hoạt động
-    const readingZone = document.getElementById("reading-zone-active");
+    // FIX: dùng findElementDeep thay vì document.getElementById thẳng, vì
+    // Gradio thường bọc UI trong Shadow DOM (xem comment của findElementDeep
+    // bên dưới) -> getElementById thường có thể không thấy được phần tử này,
+    // khiến cả tính năng bôi đen tra nghĩa im lặng không chạy.
+    const readingZone = findElementDeep("reading-zone-active");
     if (!readingZone) {
         return;
     }
@@ -23,7 +27,7 @@ function handleSelectionChange() {
         console.log("📌 Từ được chọn:", selectedText);
 
         // 1. Cập nhật trực tiếp vào ô selected_word_txt để hiển thị tức thì
-        const selectedWordContainer = document.getElementById("selected_word_txt");
+        const selectedWordContainer = findElementDeep("selected_word_txt");
         if (selectedWordContainer) {
             const inputElement = selectedWordContainer.querySelector("textarea") || selectedWordContainer.querySelector("input");
             if (inputElement) {
@@ -34,7 +38,7 @@ function handleSelectionChange() {
         }
 
         // 2. Đồng thời cập nhật vào hidden_trigger_vocab đề phòng các xử lý phía backend (nếu có)
-        const hiddenContainer = document.getElementById("hidden_trigger_vocab");
+        const hiddenContainer = findElementDeep("hidden_trigger_vocab");
         if (hiddenContainer) {
             const hiddenInput = hiddenContainer.querySelector("textarea") || hiddenContainer.querySelector("input");
             if (hiddenInput) {
@@ -80,15 +84,16 @@ function findFileInputDeep(container) {
     return null;
 }
 
-let recorder = null;
-let chunks = [];
-
-function initRecorder(){
-    const btn = document.getElementById("record-btn");
-    if(!btn) return;
-
+function setupRecordButton(btn){
     if(btn.dataset.loaded === "1") return;
     btn.dataset.loaded = "1";
+
+    // Nút Word gốc không có data-target -> mặc định dùng "hidden-audio-recorder"
+    // để không phá hành vi cũ. Nút Sentence có data-target="hidden-audio-recorder-sentence".
+    const targetId = btn.dataset.target || "hidden-audio-recorder";
+
+    let recorder = null;
+    let chunks = [];
 
     btn.onclick = async () => {
         // =========================
@@ -96,9 +101,9 @@ function initRecorder(){
         // =========================
         if(recorder == null){
             try {
-                console.log("🎙️ [1] Đang xin quyền micro...");
+                console.log(`🎙️ [1] (${targetId}) Đang xin quyền micro...`);
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                console.log("✅ [2] Đã có quyền micro, bắt đầu ghi âm.");
+                console.log(`✅ [2] (${targetId}) Đã có quyền micro, bắt đầu ghi âm.`);
                 recorder = new MediaRecorder(stream);
                 chunks = [];
 
@@ -109,21 +114,22 @@ function initRecorder(){
                 };
 
                 recorder.onstop = () => {
-                    console.log(`🛑 [3] Đã dừng ghi âm, số chunk: ${chunks.length}`);
+                    btn.disabled = false; // mở lại nút sau khi đã dừng xong hẳn
+                    console.log(`🛑 [3] (${targetId}) Đã dừng ghi âm, số chunk: ${chunks.length}`);
                     const blob = new Blob(chunks, { type: "audio/webm" });
-                    console.log(`📦 [4] Tạo blob, kích thước: ${blob.size} bytes`);
+                    console.log(`📦 [4] (${targetId}) Tạo blob, kích thước: ${blob.size} bytes`);
 
                     // Tên file có timestamp để tránh trường hợp trình duyệt/Gradio
                     // coi 2 lần ghi âm liên tiếp là "cùng 1 file" và không bắn change.
                     const file = new File([blob], `record_${Date.now()}.webm`, { type: "audio/webm" });
 
-                    // Tìm input file trong component gr.File ẩn ("hidden-audio-recorder"),
+                    // Tìm input file trong đúng component gr.File ẩn ứng với nút này,
                     // xuyên qua Shadow DOM nếu cần.
-                    const container = findElementDeep("hidden-audio-recorder");
-                    console.log("🔍 [5] Container #hidden-audio-recorder:", container);
+                    const container = findElementDeep(targetId);
+                    console.log(`🔍 [5] (${targetId}) Container:`, container);
 
                     const input = findFileInputDeep(container);
-                    console.log("🔍 [6] Input file tìm được:", input);
+                    console.log(`🔍 [6] (${targetId}) Input file tìm được:`, input);
 
                     if (input) {
                         // Reset trước để đảm bảo sự kiện change luôn được kích hoạt lại
@@ -136,9 +142,9 @@ function initRecorder(){
                         // Dispatch cả input lẫn change để chắc chắn Gradio (Svelte) bắt được
                         input.dispatchEvent(new Event("input", { bubbles: true }));
                         input.dispatchEvent(new Event("change", { bubbles: true }));
-                        console.log("🚀 [7] Đã dispatch input/change lên Gradio.");
+                        console.log(`🚀 [7] (${targetId}) Đã dispatch input/change lên Gradio.`);
                     } else {
-                        console.error("❌ Không tìm thấy input[type=file] trong #hidden-audio-recorder");
+                        console.error(`❌ Không tìm thấy input[type=file] trong #${targetId}`);
                         if (container) {
                             console.log("📋 Cấu trúc bên trong container:", container.outerHTML.slice(0, 2000));
                         }
@@ -153,19 +159,30 @@ function initRecorder(){
                 btn.innerHTML = "■ Stop";
                 btn.classList.add("recording");
             } catch (err) {
-                console.error("❌ Không thể truy cập Microphone:", err);
+                console.error(`❌ (${targetId}) Không thể truy cập Microphone:`, err);
             }
         }
         // =========================
         // STOP RECORD
         // =========================
         else {
-            console.log("⏹️ Bấm nút Stop...");
+            console.log(`⏹️ (${targetId}) Bấm nút Stop...`);
+            // FIX: khóa nút ngay để tránh double-click gọi recorder.stop() 2 lần
+            // trước khi onstop (bất đồng bộ) kịp chạy xong -> tránh InvalidStateError.
+            // Không ảnh hưởng hành vi cũ: nút vẫn mở lại ngay khi onstop xử lý xong.
+            btn.disabled = true;
             recorder.stop();
             // Dừng tất cả các track micro để tắt đèn báo ghi âm trên trình duyệt
             recorder.stream.getTracks().forEach(track => track.stop());
         }
     };
+}
+
+function initRecorder(){
+    // Gắn sự kiện cho TẤT CẢ các nút có class "record-btn" (Word, Sentence, và
+    // các tab sau này nếu thêm) — mỗi nút tự tìm ô hidden-audio-recorder riêng
+    // qua thuộc tính data-target.
+    document.querySelectorAll(".record-btn").forEach(setupRecordButton);
 }
 
 setInterval(initRecorder, 500);

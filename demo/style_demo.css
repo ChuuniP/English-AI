@@ -394,5 +394,27 @@ a[download] {
     font-size: 16px !important;
     margin: 0 auto !important;
     margin-top: -40px !important;
+}
 
+#topic-1minute-card {
+    text-align: center;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.5;
+    padding: 24px 28px;
+    margin: 4px 0 8px 0;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #fef3f2 0%, #fff 100%);
+    border: 1px solid #fecaca;
+    color: #1f2937;
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#topic-1minute-card em {
+    font-weight: 400;
+    color: #9ca3af;
+    font-size: 15px;
 }

@@ -1,3 +1,4 @@
+import json
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModel
@@ -66,12 +67,91 @@ def score_essay(text: str, tokenizer, model, MAX_LEN, SCORE_MIN, SCORE_MAX, SCOR
     return result
 
 
-def handle_essay_scoring(content, tokenizer, model, max_len, score_min, score_max, columns, device, client):
+def check_essay_topic_relevance(topic, content, client) -> dict:
+    """
+    Dùng AI (Gemini) để kiểm tra xem nội dung bài luận (content) có thực sự
+    bám sát đề bài (topic) hay không.
 
+    Trả về dict dạng {"is_relevant": bool, "reason": str}.
+    Nếu không có client, hoặc thiếu topic/content, hoặc gọi API lỗi -> mặc định
+    coi là hợp lệ (is_relevant=True) để không chặn oan người dùng.
+    """
+    if not client:
+        return {"is_relevant": True, "reason": ""}
+    if not topic or not topic.strip() or not content or not content.strip():
+        return {"is_relevant": True, "reason": ""}
+
+    prompt = f"""
+    You are an English writing examiner (IELTS-style). Determine whether the essay content below
+    is actually written in response to the given topic/prompt, or if it is off-topic / unrelated.
+
+    Topic/Prompt:
+    \"\"\"{topic}\"\"\"
+
+    Essay Content:
+    \"\"\"{content}\"\"\"
+
+    Respond STRICTLY with a single JSON object and nothing else (no markdown, no code fences),
+    in exactly this format:
+    {{"is_relevant": true or false, "reason": "brief explanation in Vietnamese"}}
+    """
+
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        raw = response.text.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        data = json.loads(raw)
+        return {
+            "is_relevant": bool(data.get("is_relevant", True)),
+            "reason": data.get("reason", ""),
+        }
+    except Exception as e:
+        # Nếu không parse được / lỗi gọi API thì fallback coi như hợp lệ
+        return {"is_relevant": True, "reason": f"Không kiểm tra được độ liên quan tới đề bài: {str(e)}"}
+
+
+def handle_essay_scoring(topic, content, tokenizer, model, max_len, score_min, score_max, columns, device, client):
+
+    zero_score = "0.00/5"
+
+    # 1. Kiểm tra xem bài viết có bám sát đề bài (topic) hay không trước khi chấm điểm
+    relevance = check_essay_topic_relevance(topic, content, client)
+    if not relevance["is_relevant"]:
+        warning_html = f"""
+        <div class="band-seal">
+            <div class="band-ring" style="--pct: 0;">
+                <div class="band-ring-inner">
+                    <span class="band-number">0.00</span>
+                </div>
+            </div>
+            <span class="band-caption">Off-topic</span>
+        </div>
+        """
+        off_topic_feedback = f"""
+        <div style="color:#b45309; background:#fffbeb; border:1px solid #fcd34d; padding:12px; border-radius:8px;">
+            ⚠️ Bài viết có vẻ <b>không bám sát đề bài (topic)</b> đã cho nên hệ thống chưa thể chấm điểm.<br>
+            {relevance.get('reason', '')}
+        </div>
+        """
+        return (
+            warning_html,
+            zero_score, zero_score, zero_score, zero_score, zero_score, zero_score,
+            off_topic_feedback
+        )
+
+    # 2. Nếu bám sát đề bài thì chấm điểm và lấy feedback như bình thường
     scores = score_essay(content, tokenizer, model, max_len, score_min, score_max, columns, device)
     ai_feedback_html = generate_essay_feedback(content, client)
     if not scores:
-        return "0/5", "0/5", "0/5", "0/5", "0/5", "0/5", "0/5"
+        no_score_feedback = "<div style='color: #ef4444; padding: 10px;'>❌ Không thể chấm điểm bài luận.</div>"
+        return (
+            "0/5",
+            zero_score, zero_score, zero_score, zero_score, zero_score, zero_score,
+            no_score_feedback
+        )
 
     cohesion = f"{scores.get('Cohesion', 0):.2f}/5"
     syntax = f"{scores.get('Syntax', 0):.2f}/5"

@@ -45,6 +45,21 @@ CREATE TABLE IF NOT EXISTS mp3_transcripts (
     transcript TEXT,
     questions_json TEXT
 );
+
+-- 5. Bảng lưu trữ câu độc lập dùng cho luyện nói (Speaking - tab Sentence)
+CREATE TABLE IF NOT EXISTS sentences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sentence TEXT NOT NULL UNIQUE,
+    meaning TEXT
+);
+
+-- 6. Bảng lưu trữ topic dùng cho luyện nói (Speaking - tab 1 minute)
+CREATE TABLE IF NOT EXISTS topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic TEXT NOT NULL UNIQUE,
+    category TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_topics_category ON topics(category);
 """
 
 _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -381,6 +396,180 @@ class DatabaseManager:
             ORDER BY RANDOM() 
             LIMIT ?
         """, (limit,))
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
+
+# --- QUẢN LÝ CÂU LUYỆN NÓI (Speaking - tab Sentence) ---
+
+    def add_sentence(self, sentence: str, meaning: str = None) -> int:
+        """Thêm mới 1 câu luyện nói. Trả về sentence_id (trả về id cũ nếu câu đã tồn tại)."""
+        if not sentence or not sentence.strip():
+            raise ValueError("Câu không được để trống!")
+
+        clean_sentence = sentence.strip()
+        cur = self.conn.cursor()
+
+        # 1. Kiểm tra câu đã tồn tại chưa (không phân biệt hoa/thường)
+        cur.execute("SELECT id FROM sentences WHERE LOWER(sentence) = LOWER(?)", (clean_sentence,))
+        row = cur.fetchone()
+
+        if row:
+            sentence_id = row["id"]
+            cur.execute("""
+                UPDATE sentences
+                SET meaning = COALESCE(meaning, ?)
+                WHERE id = ?
+            """, (meaning, sentence_id))
+            self.conn.commit()
+            return sentence_id
+
+        # 2. Nếu chưa có thì thêm mới
+        cur.execute(
+            "INSERT INTO sentences (sentence, meaning) VALUES (?, ?)",
+            (clean_sentence, meaning)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_sentence(self, sentence: str) -> dict | None:
+        """Truy xuất thông tin 1 câu theo nội dung câu."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, sentence, meaning FROM sentences WHERE sentence = ?", (sentence,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_all_sentences(self) -> list[dict]:
+        """Lấy toàn bộ câu luyện nói trong hệ thống."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, sentence, meaning FROM sentences")
+        return [dict(row) for row in cur.fetchall()]
+
+    def delete_sentence(self, sentence_id: int):
+        """Xoá 1 câu luyện nói theo id."""
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM sentences WHERE id = ?", (sentence_id,))
+        self.conn.commit()
+
+    def get_random_sentences_for_speaking(self, limit: int = 5) -> list[dict]:
+        """Lấy ngẫu nhiên tối đa 'limit' câu từ bảng sentences."""
+        cur = self.conn.cursor()
+        cur.execute("""
+            SELECT sentence, meaning
+            FROM sentences
+            ORDER BY RANDOM()
+            LIMIT ?
+        """, (limit,))
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
+
+# --- QUẢN LÝ TOPIC (Speaking - tab 1 minute) ---
+
+    def add_topic(self, topic: str, category: str = None) -> int:
+        """Thêm mới 1 topic. Trả về topic_id (trả về id cũ nếu topic đã tồn tại)."""
+        if not topic or not topic.strip():
+            raise ValueError("Topic không được để trống!")
+
+        clean_topic = topic.strip()
+        cur = self.conn.cursor()
+
+        # 1. Kiểm tra topic đã tồn tại chưa (không phân biệt hoa/thường)
+        cur.execute("SELECT id FROM topics WHERE LOWER(topic) = LOWER(?)", (clean_topic,))
+        row = cur.fetchone()
+
+        if row:
+            topic_id = row["id"]
+            cur.execute("""
+                UPDATE topics
+                SET category = COALESCE(category, ?)
+                WHERE id = ?
+            """, (category, topic_id))
+            self.conn.commit()
+            return topic_id
+
+        # 2. Nếu chưa có thì thêm mới
+        cur.execute(
+            "INSERT INTO topics (topic, category) VALUES (?, ?)",
+            (clean_topic, category)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_topic(self, topic: str) -> dict | None:
+        """Truy xuất thông tin 1 topic theo nội dung topic."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, topic, category FROM topics WHERE topic = ?", (topic,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_all_topics(self, category: str = None) -> list[dict]:
+        """Lấy toàn bộ topic trong hệ thống, có thể lọc theo category."""
+        cur = self.conn.cursor()
+        if category:
+            cur.execute("SELECT id, topic, category FROM topics WHERE category = ?", (category,))
+        else:
+            cur.execute("SELECT id, topic, category FROM topics")
+        return [dict(row) for row in cur.fetchall()]
+
+    def list_all_topic_categories(self) -> list[str]:
+        """Lấy danh sách các phân loại (category) hiện có, không trùng lặp."""
+        cur = self.conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT category FROM topics
+            WHERE category IS NOT NULL AND category != ''
+            ORDER BY category
+        """)
+        return [row["category"] for row in cur.fetchall()]
+
+    def update_topic(self, topic_id: int, topic: str = None, category: str = None):
+        """Cập nhật nội dung topic và/hoặc category theo id."""
+        cur = self.conn.cursor()
+        if topic is not None:
+            cur.execute("UPDATE topics SET topic = ? WHERE id = ?", (topic.strip(), topic_id))
+        if category is not None:
+            cur.execute("UPDATE topics SET category = ? WHERE id = ?", (category, topic_id))
+        self.conn.commit()
+
+    def delete_topic(self, topic_id: int):
+        """Xoá 1 topic theo id."""
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM topics WHERE id = ?", (topic_id,))
+        self.conn.commit()
+
+    def get_random_topic_for_speaking(self, category: str = None) -> dict | None:
+        """Lấy ngẫu nhiên 1 topic, có thể lọc theo category (dùng cho tab 1 minute)."""
+        cur = self.conn.cursor()
+        if category:
+            cur.execute("""
+                SELECT topic, category FROM topics
+                WHERE category = ?
+                ORDER BY RANDOM() LIMIT 1
+            """, (category,))
+        else:
+            cur.execute("""
+                SELECT topic, category FROM topics
+                ORDER BY RANDOM() LIMIT 1
+            """)
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_random_topics_for_speaking(self, limit: int = 5, category: str = None) -> list[dict]:
+        """Lấy ngẫu nhiên tối đa 'limit' topic từ bảng topics, có thể lọc theo category."""
+        cur = self.conn.cursor()
+        if category:
+            cur.execute("""
+                SELECT topic, category
+                FROM topics
+                WHERE category = ?
+                ORDER BY RANDOM()
+                LIMIT ?
+            """, (category, limit))
+        else:
+            cur.execute("""
+                SELECT topic, category
+                FROM topics
+                ORDER BY RANDOM()
+                LIMIT ?
+            """, (limit,))
         rows = cur.fetchall()
         return [dict(row) for row in rows]
 
