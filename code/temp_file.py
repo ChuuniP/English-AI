@@ -34,8 +34,9 @@ from functools import partial
 # ---------- KHAI BÁO PATH ----------
 TEMP_DIR = os.getenv("APP_TEMP_DIR", os.path.join(project_root, "temp"))
 HF_CACHE_DIR = os.getenv("APP_HF_CACHE_DIR", os.path.join(project_root, "huggingface_cache"))
+AUDIO_CACHE_DIR = os.path.join(TEMP_DIR, "audio_cache")
 
-for d in (TEMP_DIR, HF_CACHE_DIR):
+for d in (TEMP_DIR, HF_CACHE_DIR, AUDIO_CACHE_DIR):
     try:
         os.makedirs(d, exist_ok=True)
     except OSError as e:
@@ -155,7 +156,7 @@ ESSAY_SCORING_COLUMNS = ["Cohesion", "Syntax", "Vocabulary", "Phraseology", "Gra
 ESSAY_MODEL_NAME = "microsoft/deberta-v3-base"
 ESSAY_SCORE_MIN, ESSAY_SCORE_MAX = 1.0, 5.0
 ESSAY_MAX_LEN = 512
-ESSAY_MODEL_WEIGHTS_PATH = r"E:\Đồ án môn học\Demo Speaking Module\models\best_model.bin"
+ESSAY_MODEL_WEIGHTS_PATH = os.path.join(project_root, "models", "best_model.bin")
 # essay_scoring_tokenizer, essay_scoring_model = wm.load_model(ESSAY_MODEL_WEIGHTS_PATH, device, ESSAY_MODEL_NAME, ESSAY_SCORING_COLUMNS)
 essay_scoring_tokenizer, essay_scoring_model = "", ""
 # ---------- GIAO DIỆN ----------
@@ -1077,4 +1078,4 @@ else:
 
 demo.queue(default_concurrency_limit=1, max_size=20)
 demo.launch(css=custom_css_content, theme=gr.themes.Soft(), js=custom_js_content,
-            allowed_paths=[project_root, r"E:\tmp\audio_cache"])
+            allowed_paths=[project_root, AUDIO_CACHE_DIR])

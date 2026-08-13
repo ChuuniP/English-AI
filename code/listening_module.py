@@ -12,6 +12,11 @@ import glob
 from vocabulary_module import process_vocabulary_info
 # Đổi sang import DatabaseManager từ file database_manager
 from database.database_manager import DatabaseManager
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+AUDIO_CACHE_DIR = PROJECT_ROOT / "temp" / "audio_cache"
+AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 db = DatabaseManager()
 
 def load_video(VIDEO_PATH):
@@ -377,14 +382,14 @@ def process_start_practice(client, cefr_dict_sample, cefr_level, translator, lem
                 "", "", None, "", "", gr.update(interactive=True)
             )
 
-    os.makedirs("/tmp/audio_cache", exist_ok=True)
+    AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     parsed_questions = []
 
     for idx, item in enumerate(generated_data):
         target_word = item["word"]
         full_sentence = item["full_sentence"]
         blank_sentence = re.sub(rf"\b{re.escape(target_word)}\b", "______", full_sentence)
-        audio_file = f"/tmp/audio_cache/q_{idx}.mp3"
+        audio_file = str(AUDIO_CACHE_DIR / f"q_{idx}.mp3")
         generate_audio(full_sentence, audio_file)
 
         parsed_questions.append({
