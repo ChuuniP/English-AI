@@ -17,6 +17,32 @@ except ImportError:
     _IPA_AVAILABLE = False
 
 
+# ---------------------------------------------------------------------------
+# Helper nội bộ (mới thêm để sửa lỗi)
+# ---------------------------------------------------------------------------
+def _parse_iso_datetime_utc(value):
+    """
+    Parse chuỗi ISO datetime an toàn về dạng aware UTC.
+    Sửa lỗi: nếu chuỗi lưu trong DB không có tzinfo (naive), so sánh trực
+    tiếp với datetime.now(timezone.utc) sẽ raise TypeError. Hàm này luôn
+    trả về datetime có tzinfo UTC, hoặc None nếu value rỗng/không hợp lệ.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime.datetime):
+        dt = value
+    else:
+        dt = datetime.datetime.fromisoformat(value)
+
+    if dt.tzinfo is None:
+        # Dữ liệu cũ không có offset -> coi như đã là UTC (giả định hợp lý
+        # vì mọi timestamp mới đều được lưu bằng now(timezone.utc).isoformat())
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    else:
+        dt = dt.astimezone(datetime.timezone.utc)
+    return dt
+
+
 def load_review_session():
     """Tải dữ liệu từ vựng cần ôn tập bằng DatabaseManager."""
     total_vocab = db.get_total_vocabulary_count()
@@ -33,25 +59,27 @@ def load_review_session():
         # 0: word, 1: cefr_j, 2: meaning, 3: phonetic, 4: state, 5: stability, 6: difficulty,
         # 7: elapsed_days, 8: scheduled_days, 9: last_review, 10: due
         state_val = int(row[4])
-        due_time = datetime.datetime.fromisoformat(row[10])
+        due_time = _parse_iso_datetime_utc(row[10])
         last_review_str = row[9]
 
-        if state_val == 0 or due_time <= now:
+        if state_val == 0 or due_time is None or due_time <= now:
             due_list.append(row)
         elif last_review_str:
-            last_review_dt = datetime.datetime.fromisoformat(last_review_str)
-            if last_review_dt.astimezone(datetime.timezone.utc).date() == today:
+            last_review_dt = _parse_iso_datetime_utc(last_review_str)
+            if last_review_dt is not None and last_review_dt.date() == today:
                 completed_count += 1
 
     total_due = len(due_list) + completed_count
     if not due_list:
         return (total_due, total_vocab, completed_count, 0, "All Words Have Done!", "N/A", "N/A", "", [],
-                gr.update(visible=False), gr.update(visible=False), gr.update(visible=True))
+                gr.update(visible=False), gr.update(visible=False), gr.update(visible=True),
+                gr.update(visible=False))
 
     current_word_data = due_list[0]
     return (total_due, total_vocab, completed_count, completed_count + 1,
             current_word_data[0], current_word_data[1], current_word_data[2], current_word_data[3],
-            due_list, gr.update(visible=True), gr.update(visible=False), gr.update(visible=False))
+            due_list, gr.update(visible=True), gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False))
 
 
 def _build_cefr_html(cefr, meaning, phonetic, word):
@@ -76,8 +104,10 @@ def show_answer_action(due_list_state):
     if due_list_state:
         word, cefr, meaning, phonetic, *_ = due_list_state[0]
         cefr_html = _build_cefr_html(cefr, meaning, phonetic, word)
+        print(cefr_html)
     else:
         cefr_html = ""
+        print("Không có dữ liệu, lỗi chỗ này")
 
     return (
         gr.update(visible=False),
@@ -85,6 +115,38 @@ def show_answer_action(due_list_state):
         gr.update(visible=True),
         gr.update(value=cefr_html, visible=True)
     )
+
+
+def show_answer_toggle_visibility():
+    """
+    Bước 1: chỉ đổi visibility của area_question / area_answer / fsrs_buttons_row.
+    Tách riêng khỏi việc set value cho cefr_display để tránh bug Gradio:
+    khi 1 gr.HTML đang visible=False mà đổi visible=True và value cùng lúc
+    trong 1 lần update, đôi khi frontend chỉ toggle hiển thị mà KHÔNG
+    re-render nội dung HTML ở lần đầu (phải bấm lần 2 mới thấy).
+    """
+    return (
+        gr.update(visible=False),  # area_question
+        gr.update(visible=True),   # area_answer
+        gr.update(visible=True),   # fsrs_buttons_row
+    )
+
+
+def show_answer_action_content_only(due_list_state):
+    """
+    Bước 2: chạy SAU khi cefr_display đã visible=True (nhờ .then()),
+    lúc này chỉ cần set value -> component sẽ re-render nội dung đúng
+    ngay từ lần bấm đầu tiên.
+    """
+    if due_list_state:
+        word, cefr, meaning, phonetic, *_ = due_list_state[0]
+        cefr_html = _build_cefr_html(cefr, meaning, phonetic, word)
+        print(cefr_html)
+    else:
+        cefr_html = ""
+        print("Không có dữ liệu, lỗi chỗ này")
+
+    return gr.update(value=cefr_html, visible=True)
 
 
 def review_word_action(fsrs_app, choice_str, due_list_state):
@@ -101,27 +163,31 @@ def review_word_action(fsrs_app, choice_str, due_list_state):
         "Easy": Rating.Easy
     }
 
-    rating_choice = rating_map[choice_str]
+    # SỬA: choice_str không hợp lệ trước đây sẽ làm KeyError và crash callback.
+    # Giờ fallback về "Good" và log cảnh báo thay vì crash toàn bộ UI.
+    rating_choice = rating_map.get(choice_str)
+    if rating_choice is None:
+        print(f"Cảnh báo: rating '{choice_str}' không hợp lệ, dùng mặc định 'Good'.")
+        rating_choice = Rating.Good
 
     card = Card()
     card.state = State(state)
     card.stability = stability
     card.difficulty = difficulty
     card.elapsed_days = elapsed_days
-    if last_review and isinstance(last_review, str):
-        card.last_review = datetime.datetime.fromisoformat(last_review)
-    else:
-        card.last_review = last_review
-
+    # SỬA: parse an toàn (tránh crash nếu last_review thiếu tzinfo)
+    card.last_review = _parse_iso_datetime_utc(last_review)
     card.scheduled_days = scheduled_days
-    card.due = datetime.datetime.fromisoformat(due)
+    card.due = _parse_iso_datetime_utc(due) or datetime.datetime.now(datetime.timezone.utc)
 
     now = datetime.datetime.now(datetime.timezone.utc)
     if not hasattr(card, "difficulty") or card.difficulty is None or card.difficulty < 1.0:
         card.difficulty = 5.0
     new_card, _ = fsrs_app.review_card(card, rating_choice, now)
 
-    # Cập nhật trạng thái từ vựng đã ôn qua DatabaseManager
+    # SỬA: trước đây elapsed_days/scheduled_days luôn bị ghi cứng = 0, làm mất
+    # dữ liệu thật mà fsrs vừa tính ra, ảnh hưởng tới độ chính xác lịch ôn tập
+    # ở những lần review kế tiếp. Giờ lưu đúng giá trị mới từ new_card.
     db.upsert_user_vocabulary(
         word=word,
         cefr_j=cefr_j,
@@ -130,8 +196,8 @@ def review_word_action(fsrs_app, choice_str, due_list_state):
         state=new_card.state.value,
         stability=new_card.stability,
         difficulty=new_card.difficulty,
-        elapsed_days=0,
-        scheduled_days=0,
+        elapsed_days=new_card.elapsed_days,
+        scheduled_days=new_card.scheduled_days,
         last_review=new_card.last_review.isoformat() if new_card.last_review else None,
         due=new_card.due.isoformat(),
         added_at=now.isoformat()
@@ -159,7 +225,22 @@ def render_stats_and_progress(t_due, t_vocab, comp, curr_idx, word, cefr, meanin
 def pipeline_load():
     res = load_review_session()
     outputs = render_stats_and_progress(res[0], res[1], res[2], res[3], res[4], res[5], res[6], res[7], res[8])
-    return outputs + (res[9], res[10], res[11])
+    return outputs + (res[9], res[10], res[11], res[12])
+
+
+def refresh_review_session():
+    """
+    Dùng riêng cho btn_refresh ("Check again"). pipeline_load() tự nó không cho
+    người dùng biết là nút đã thật sự chạy hay chưa: nếu vẫn chưa có từ mới đến
+    hạn, kết quả trả về y hệt trạng thái cũ -> màn hình đứng yên, người dùng dễ
+    hiểu lầm là nút bị lỗi/không phản hồi. Thêm toast gr.Info() để xác nhận.
+    """
+    result = pipeline_load()
+    due_list = result[8]  # vị trí due_list trong tuple trả về của pipeline_load
+    if not due_list:
+        gr.Info("Chưa có từ mới nào đến hạn ôn tập. Bạn quay lại sau nhé!")
+    return result
+
 
 def get_base_word(lemmatizer, word: str) -> str:
     """Chuyển từ về dạng nguyên thể (Lemma)."""
@@ -167,12 +248,16 @@ def get_base_word(lemmatizer, word: str) -> str:
     if not clean_word:
         return ""
 
-    if lemmatizer:
-        base_v = lemmatizer.lemmatize(clean_word, pos=wordnet.VERB)
-        if base_v != clean_word:
-            return base_v
-        base_n = lemmatizer.lemmatize(clean_word, pos=wordnet.NOUN)
+    if not lemmatizer:
+        return clean_word
+    base_n = lemmatizer.lemmatize(clean_word, pos=wordnet.NOUN)
+    if base_n != clean_word:
         return base_n
+
+    base_v = lemmatizer.lemmatize(clean_word, pos=wordnet.VERB)
+    if base_v != clean_word:
+        return base_v
+
     return clean_word
 
 
@@ -188,9 +273,16 @@ def get_translation_with_retry(translator, words: str, max_retries: int = 3, del
 
     for attempt in range(max_retries):
         try:
-            meaning = translator.translate(word_str)
-            if meaning and meaning.strip():
+            result = translator.translate(word_str)
+            # SỬA: translate() có thể trả về None dù không raise exception
+            # (vd timeout im lặng ở một số bản deep_translator). Trước đây
+            # meaning.strip() ở cuối hàm sẽ crash AttributeError trong
+            # trường hợp này. Giờ chỉ nhận kết quả khi nó là chuỗi hợp lệ.
+            if result and isinstance(result, str) and result.strip():
+                meaning = result
                 break
+            if attempt < max_retries - 1:
+                time.sleep(delay)
         except Exception as e:
             if attempt == max_retries - 1:
                 print(f"Lỗi dịch sau {max_retries} lần thử: {e}")
@@ -198,7 +290,7 @@ def get_translation_with_retry(translator, words: str, max_retries: int = 3, del
             else:
                 time.sleep(delay)
 
-    return meaning.strip()
+    return meaning.strip() if isinstance(meaning, str) else word_str
 
 
 def estimate_cefr_level(CEFR_DICT: dict, target_word: str) -> str:

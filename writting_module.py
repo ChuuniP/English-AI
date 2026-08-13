@@ -306,8 +306,7 @@ def on_difficulty_change(db, difficulty):
 
 
 def on_topic_change(db, difficulty, topic_category):
-    """Chọn Chủ đề -> mở khoá Dạng bài (chỉ hiện dạng bài tồn tại với Độ khó +
-    Chủ đề đã chọn), reset danh sách đề tài."""
+
     if not topic_category:
         return (
             gr.update(choices=[], value=None, interactive=False),
@@ -324,8 +323,6 @@ def on_topic_change(db, difficulty, topic_category):
 
 
 def on_task_type_change(db, difficulty, topic_category, task_type):
-    """Đã chọn đủ cả 3 (Độ khó / Chủ đề / Dạng bài) -> hiển thị TẤT CẢ đề tài
-    khớp để người dùng bấm chọn; mặc định chọn sẵn đề tài đầu tiên."""
     if not task_type:
         return gr.update(choices=[], value=None, visible=False), None
 

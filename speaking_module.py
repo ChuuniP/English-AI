@@ -36,74 +36,341 @@ def get_phonetic_ipa(word):
     except Exception:
         return ""
 
-def handle_voice_stream(audio, history, client, model_whisper, wav2vec2_processor,
-                        wav2vec2_model, device, retriever, chat_session):
-    yield from process_voice_gradio_stream(
-        client,
-        model_whisper,
-        wav2vec2_processor,
-        wav2vec2_model,
-        device,
-        retriever,
-        chat_session,
-        audio,
-        history
+# ==========================================================================
+# TAB "PRACTICE" (Speaking - hội thoại tự do theo chủ đề, giọng nói 2 chiều)
+# ==========================================================================
+
+TOPICS = [
+    {"id": "travel", "title": "Du lịch", "sub": "Kể về chuyến đi, xin gợi ý điểm đến"},
+    {"id": "work", "title": "Công việc", "sub": "Nói về công việc, đồng nghiệp, deadline"},
+    {"id": "hobby", "title": "Sở thích", "sub": "Chia sẻ đam mê, cuối tuần làm gì"},
+    {"id": "interview", "title": "Phỏng vấn", "sub": "Luyện trả lời câu hỏi phỏng vấn xin việc"},
+    {"id": "news", "title": "Tin tức", "sub": "Bàn luận một chủ đề thời sự nhẹ nhàng"},
+    {"id": "debate", "title": "Tranh luận", "sub": "Bảo vệ quan điểm, phản biện AI"},
+]
+TOPIC_TITLES = {t["id"]: t["title"] for t in TOPICS}
+
+LEVELS = [
+    {"id": "beginner", "label": "Mới bắt đầu"},
+    {"id": "intermediate", "label": "Trung cấp"},
+    {"id": "advanced", "label": "Nâng cao"},
+]
+LEVEL_NOTES = {
+    "beginner": "Use short, simple sentences and common words. Be patient and encouraging.",
+    "intermediate": "Use natural, everyday English with moderate vocabulary.",
+    "advanced": "Use rich vocabulary and idiomatic, native-level phrasing.",
+}
+
+ORB_LABELS = {
+    "idle": "Bấm giữ micro để nói",
+    "listening": "Đang nghe...",
+    "thinking": "AI đang soạn câu trả lời...",
+    "speaking": "AI đang nói...",
+}
+
+# CSS cho toàn bộ tab "Practice" - nhúng 1 lần duy nhất bằng gr.HTML ở đầu tab.
+# Tách riêng khỏi style_demo.css để không ảnh hưởng các tab khác, chỉ áp dụng
+# bên trong #practice-tab-wrap.
+PRACTICE_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=Inter:wght@400;500;600&display=swap');
+
+#practice-tab-wrap {
+  background: #FFFFFF;
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid #E5E7EB;
+  color: #1F2933;
+  font-family: 'Inter', sans-serif;
+}
+#practice-tab-wrap h1, #practice-tab-wrap h2, #practice-tab-wrap h3,
+#practice-tab-wrap .sp-title { font-family: 'Fraunces', serif; font-weight: 500; color: #111827; }
+
+#practice-tab-wrap .sp-topic-card {
+  background: #F8F9FB !important;
+  border: 1px solid #E2E5EA !important;
+  color: #1F2933 !important;
+  text-align: left !important;
+  border-radius: 12px !important;
+}
+#practice-tab-wrap .sp-topic-card-active {
+  background: rgba(232,163,61,0.14) !important;
+  border-color: #E8A33D !important;
+  color: #7A4A0A !important;
+}
+#practice-tab-wrap .sp-topic-grid { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+#practice-tab-wrap #sp-level-radio label { color: #1F2933 !important; }
+
+#practice-tab-wrap #sp-start-btn {
+  background: #E8A33D !important;
+  color: #2C1B04 !important;
+  border: none !important;
+  font-weight: 600 !important;
+}
+
+#practice-tab-wrap .sp-orb-wrap { text-align: center; padding: 10px 0 4px; }
+#practice-tab-wrap .sp-orb {
+  position: relative;
+  width: 96px; height: 96px;
+  margin: 0 auto;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: #EEF1F5;
+  transition: background 0.3s ease;
+}
+#practice-tab-wrap .sp-orb-listening { background: #4FA791; box-shadow: 0 0 0 6px rgba(79,167,145,0.16); }
+#practice-tab-wrap .sp-orb-speaking { background: #E8A33D; box-shadow: 0 0 0 6px rgba(232,163,61,0.16); }
+#practice-tab-wrap .sp-orb-thinking { background: #EEF1F5; }
+#practice-tab-wrap .sp-orb-core { display: flex; gap: 4px; align-items: center; height: 26px; }
+#practice-tab-wrap .sp-bar {
+  width: 4px; height: 14px; border-radius: 2px; background: #9AA5B1; display: inline-block;
+}
+#practice-tab-wrap .sp-orb-listening .sp-bar,
+#practice-tab-wrap .sp-orb-speaking .sp-bar { background: #FFFFFF; animation: sp-bar 0.9s ease-in-out infinite; }
+#practice-tab-wrap .sp-orb-thinking .sp-bar { background: #6B7683; animation: sp-think 1s ease-in-out infinite; }
+#practice-tab-wrap .sp-bar:nth-child(2) { animation-delay: 0.12s; }
+#practice-tab-wrap .sp-bar:nth-child(3) { animation-delay: 0.24s; }
+#practice-tab-wrap .sp-bar:nth-child(4) { animation-delay: 0.36s; }
+#practice-tab-wrap .sp-bar:nth-child(5) { animation-delay: 0.48s; }
+@keyframes sp-bar { 0%, 100% { height: 8px; } 50% { height: 22px; } }
+@keyframes sp-think { 0%, 100% { height: 6px; opacity: 0.4; } 50% { height: 12px; opacity: 1; } }
+#practice-tab-wrap .sp-orb-caption { font-size: 13px; color: #6B7683; margin-top: 8px; }
+
+#practice-chatbot { background: #FFFFFF !important; border: 1px solid #E5E7EB !important; border-radius: 12px !important; }
+#practice-chatbot .message.user, #practice-chatbot [data-testid="user"] {
+  background: rgba(79,167,145,0.12) !important; border: 1px solid rgba(79,167,145,0.35) !important; color: #14352C !important;
+}
+#practice-chatbot .message.bot, #practice-chatbot [data-testid="bot"] {
+  background: #F3F4F6 !important; border: 1px solid #E5E7EB !important; color: #1F2933 !important;
+}
+
+#practice-tab-wrap .sp-chip { border-radius: 10px; padding: 8px 12px; font-size: 12px; line-height: 1.5; margin-top: 6px; }
+#practice-tab-wrap .sp-chip-fix { background: rgba(226,102,92,0.10); border: 1px solid rgba(226,102,92,0.35); color: #7A241C; }
+#practice-tab-wrap .sp-chip-ok { background: rgba(79,167,145,0.10); border: 1px solid rgba(79,167,145,0.35); color: #14352C; }
+
+#practice-tab-wrap #sp-mic-audio { background: #F8F9FB !important; border: 1px solid #E5E7EB !important; border-radius: 12px !important; }
+#practice-tab-wrap #sp-end-btn { border-color: #D1D5DB !important; color: #6B7683 !important; }
+#practice-tab-wrap #sp-ai-audio { display: none !important; }
+"""
+
+
+def render_orb_html(state="idle"):
+    """Trả về HTML cho khối 'voice orb' ở giữa màn hình hội thoại.
+    Style/keyframes dùng chung được nhúng 1 lần ở đầu tab (xem PRACTICE_CSS),
+    hàm này chỉ trả về phần markup đổi theo state."""
+    state = state if state in ORB_LABELS else "idle"
+    return f"""
+<div class="sp-orb-wrap">
+  <div class="sp-orb sp-orb-{state}">
+    <div class="sp-orb-core">
+      <span class="sp-bar"></span><span class="sp-bar"></span><span class="sp-bar"></span>
+      <span class="sp-bar"></span><span class="sp-bar"></span>
+    </div>
+  </div>
+  <p class="sp-orb-caption">{ORB_LABELS[state]}</p>
+</div>
+"""
+
+
+def render_correction_html(correction_text):
+    """Trả về HTML cho ô 'sửa lỗi' hiển thị dưới bong bóng chat của AI."""
+    text = (correction_text or "").strip()
+    if not text:
+        return ""
+    if text.lower().startswith("no notable mistakes") or text.lower().startswith("không có lỗi"):
+        return f'<div class="sp-chip sp-chip-ok">✓ {text}</div>'
+    return f'<div class="sp-chip sp-chip-fix">{text}</div>'
+
+
+def select_topic(topic_id):
+    """Đánh dấu topic vừa bấm là active, bỏ active các topic khác."""
+    updates = [gr.update(elem_classes="sp-topic-card sp-topic-card-active" if t["id"] == topic_id
+                          else "sp-topic-card") for t in TOPICS]
+    return (topic_id, *updates)
+
+
+def select_custom_topic():
+    """Khi người dùng gõ chủ đề riêng, bỏ active hết các topic card có sẵn."""
+    updates = [gr.update(elem_classes="sp-topic-card") for _ in TOPICS]
+    return ("custom", *updates)
+
+
+def resolve_topic_title(topic_id, custom_topic):
+    if topic_id == "custom":
+        return (custom_topic or "").strip()
+    return TOPIC_TITLES.get(topic_id, "")
+
+
+def parse_practice_sections(text):
+    """Tách phần [1. CONVERSATION] và [2. CORRECTION] từ output của Gemini."""
+    match_chat = re.search(r"\[1\.\s*CONVERSATION\](.*?)(?=\[2\.|\Z)", text, re.DOTALL | re.IGNORECASE)
+    match_corr = re.search(r"\[2\.\s*CORRECTION\](.*?)(?=\Z)", text, re.DOTALL | re.IGNORECASE)
+
+    if match_chat:
+        reply = match_chat.group(1).strip()
+    else:
+        # Fallback: không match được header [1. CONVERSATION] (Gemini trả về
+        # sai định dạng). Để tránh đọc nhầm phần [2. CORRECTION] (có tiếng
+        # Việt) qua TTS tiếng Anh, cắt bỏ mọi thứ từ "[2." trở đi trước khi
+        # dùng làm câu thoại.
+        reply = re.split(r"\[2\.", text, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+        # Nếu vẫn còn sót header "[1. ...]" ở đầu thì bỏ luôn cho sạch.
+        reply = re.sub(r"^\[1\.\s*CONVERSATION\]\s*", "", reply, flags=re.IGNORECASE).strip()
+
+    correction = match_corr.group(1).strip() if match_corr else ""
+    return reply, correction
+
+
+def build_practice_prompt(topic_title, level, history_str, user_text=None):
+    level_note = LEVEL_NOTES.get(level, LEVEL_NOTES["intermediate"])
+    turn_instruction = (
+        f'The user just said: "{user_text}"'
+        if user_text
+        else "This is the very first message. Greet the learner briefly and open the conversation on the topic below."
     )
 
-def process_voice_gradio_stream(client, model_whisper, wav2vec2_processor, wav2vec2_model, device, retriever,
-                                chat_session, audio_path, current_chat_history):
-    if current_chat_history is None:
-        current_chat_history = []
+    return f"""
+You are a warm, patient English conversation partner helping a Vietnamese learner practice speaking on
+the topic "{topic_title}". {level_note}
 
-    # 1. Kiểm tra audio
+--- CHAT HISTORY ---
+{history_str}
+
+{turn_instruction}
+
+--- SYSTEM INSTRUCTIONS ---
+Structure your response into EXACTLY 2 sections, labeled exactly as follows:
+
+[1. CONVERSATION]
+(Your natural reply, 1-3 sentences, always ending with a follow-up question to keep the learner talking.
+English only.)
+
+[2. CORRECTION]
+(If the user's last message had a notable grammar or word-choice mistake, write it in this exact shape:
+Original: "..." -> Better: "..." followed by one short reason, in English.
+If there is no user message yet, or the sentence was already fine, write exactly: No notable mistakes.
+Everything you write, in both sections, must be in English only — do not use any Vietnamese.)
+"""
+
+
+def generate_practice_response_stream(client, topic_title, level, chat_session, user_text=None):
+    history_str = chat_session.get_history_as_string()
+    prompt = build_practice_prompt(topic_title, level, history_str, user_text)
+
+    response_stream = client.models.generate_content_stream(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
+
+    full_text = ""
+    for chunk in response_stream:
+        if chunk.text:
+            full_text += chunk.text
+            yield full_text
+
+    if user_text:
+        chat_session.add_message("User", user_text)
+    reply, _ = parse_practice_sections(full_text)
+    chat_session.add_message("Assistant", reply)
+
+
+def start_practice_topic(topic_id, custom_topic, level, chat_session, client):
+    topic_title = resolve_topic_title(topic_id, custom_topic)
+
+    if not topic_title:
+        return (
+            gr.update(), gr.update(), [], "", "",
+            None, render_orb_html("idle"), chat_session,
+            "⚠️ Chọn một chủ đề trước đã nhé.",
+        )
+
+    new_session = chat_session.__class__()
+
+    if not client:
+        greeting = (
+            f"Let's talk about {topic_title}. "
+            "(⚠️ Chưa cấu hình GEMINI_API_KEY nên AI chưa thể trò chuyện thật.)"
+        )
+        new_session.add_message("Assistant", greeting)
+        return (
+            gr.update(visible=False), gr.update(visible=True),
+            [{"role": "assistant", "content": greeting}],
+            topic_title, topic_title, None, render_orb_html("idle"), new_session, "",
+        )
+
+    full_raw = ""
+    for partial in generate_practice_response_stream(client, topic_title, level, new_session, user_text=None):
+        full_raw = partial
+    reply, _ = parse_practice_sections(full_raw) if full_raw else (
+        f"Let's talk about {topic_title}. What comes to your mind first?", "")
+
+    audio_path = speak_text(reply)
+
+    return (
+        gr.update(visible=False), gr.update(visible=True),
+        [{"role": "assistant", "content": reply}],
+        topic_title, topic_title, audio_path, render_orb_html("speaking"), new_session, "",
+    )
+
+
+def end_practice_session():
+    return (
+        gr.update(visible=True), gr.update(visible=False), [], "", "",
+        None, render_orb_html("idle"),
+    )
+
+
+def process_practice_voice_stream(audio_path, history, chat_session, topic_title, level, client, model_whisper):
+    """Xử lý 1 lượt nói của người dùng trong hội thoại luyện nói theo chủ đề.
+
+    Trả về đúng thứ tự output cho: practice_chatbot, correction_html,
+    ai_audio_out, orb_html, chat_session_state, audio_input (reset)
+    """
+    if history is None:
+        history = []
+
     if not audio_path:
-        yield current_chat_history, "Vui lòng ghi âm trước.", "", None
+        yield history, "", None, render_orb_html("idle"), chat_session, None
         return
 
-    # 2. Kiểm tra API Client
     if not client:
-        yield current_chat_history, "Vui lòng cấu hình GEMINI_API_KEY.", "", None
+        yield history, render_correction_html("⚠️ Vui lòng cấu hình GEMINI_API_KEY."), None, render_orb_html("idle"), chat_session, None
         return
 
     try:
         with open(audio_path, "rb") as f:
             file_content = f.read()
-
-        # Trích xuất văn bản từ Audio
-        transcribed_text = extract_text(file_content, model_whisper)
-        phonemes_text = extract_phonemes(file_content, wav2vec2_processor, wav2vec2_model,
-                                         device) if wav2vec2_processor else ""
-        transcribed_text = "I want to buy 2 loaf of bread"
-
-        # Placeholder câu nói của User & Assistant
-        updated_history = current_chat_history + [
-            {"role": "user", "content": transcribed_text},
-            {"role": "assistant", "content": "..."}
-        ]
-
-        # Update UI lượt đầu
-        yield updated_history, "Đang phân tích...", "Đang tạo gợi ý...", None
-
-        # 3. Stream câu trả lời từ Gemini
-        raw_stream = generate_ai_response_stream(transcribed_text, phonemes_text, retriever, client, chat_session)
-
-        for partial_ai_response in raw_stream:
-            match_chat = re.search(r"\[1\.\s*CONVERSATION\](.*?)(?=\[2\.|\Z)", partial_ai_response, re.DOTALL)
-            match_fb = re.search(r"\[2\.\s*PRONUNCIATION[^\]]*\](.*?)(?=\[3\.|\Z)", partial_ai_response,
-                                 re.DOTALL | re.IGNORECASE)
-            match_sg = re.search(r"\[3\.\s*BETTER[^\]]*\](.*?)(?=\Z)", partial_ai_response, re.DOTALL | re.IGNORECASE)
-
-            chat_display = match_chat.group(1).strip() if match_chat else partial_ai_response
-            feedback_display = match_fb.group(1).strip() if match_fb else "Đang nhận dữ liệu đánh giá..."
-            suggestions_display = match_sg.group(1).strip() if match_sg else "Đang nhận gợi ý..."
-
-            updated_history[-1] = {"role": "assistant", "content": chat_display}
-
-            # BẮT BUỘC: Luôn yield đủ đúng 4 giá trị
-            yield updated_history, feedback_display, suggestions_display, None
-
+        user_text = extract_text(file_content, model_whisper)
     except Exception as e:
-        yield current_chat_history, f"Lỗi xử lý: {str(e)}", "", None
+        yield history, render_correction_html(f"⚠️ Lỗi nhận diện giọng nói: {e}"), None, render_orb_html("idle"), chat_session, None
+        return
+
+    if not user_text or not user_text.strip():
+        yield history, render_correction_html("⚠️ Không nghe rõ, bạn thử nói lại nhé."), None, render_orb_html("idle"), chat_session, None
+        return
+
+    updated_history = history + [
+        {"role": "user", "content": user_text},
+        {"role": "assistant", "content": "..."},
+    ]
+    yield updated_history, "", None, render_orb_html("thinking"), chat_session, None
+
+    full_raw = ""
+    try:
+        for partial in generate_practice_response_stream(client, topic_title, level, chat_session, user_text):
+            full_raw = partial
+            reply, correction = parse_practice_sections(partial)
+            updated_history[-1] = {"role": "assistant", "content": reply}
+            yield updated_history, render_correction_html(correction), None, render_orb_html("thinking"), chat_session, None
+    except Exception as e:
+        yield updated_history, render_correction_html(f"⚠️ Lỗi khi gọi AI: {e}"), None, render_orb_html("idle"), chat_session, None
+        return
+
+    reply, correction = parse_practice_sections(full_raw)
+    updated_history[-1] = {"role": "assistant", "content": reply}
+    audio_reply_path = speak_text(reply)
+
+    yield updated_history, render_correction_html(correction), audio_reply_path, render_orb_html("speaking"), chat_session, None
 
 def rag_with_faiss(model_name, storage_database):
     embedding = HuggingFaceEmbeddings(model_name=model_name)
@@ -170,61 +437,6 @@ def extract_phonemes(wav_content: bytes, wav2vec2_processor, wav2vec2_model, dev
     predicted_phonemes = wav2vec2_processor.batch_decode(predicted_ids, clean_up_tokenization_spaces=False)[0]
     return predicted_phonemes
 
-
-def generate_ai_response_stream(user_speech_text, mispronunciation_output, retriever, client, chat_session):
-    # Lấy context RAG nếu retriever tồn tại
-    related_context = ""
-    if retriever:
-        related_context_docs = retriever.invoke(user_speech_text)
-        related_context = "\n".join([doc.page_content for doc in related_context_docs])
-
-    current_history = chat_session.get_history_as_string()
-
-    prompt_template = f"""
-    You are an expert English Teacher role-playing as a Grocery Store Shopkeeper.
-    The user is a customer coming into your store to buy things.
-
-    --- STORE REAL-TIME DATABASE ---
-    {related_context}
-
-    --- PHONETICS DATA ---
-    The user's speech phonemes: "{mispronunciation_output}"
-
-    --- SYSTEM INSTRUCTIONS ---
-    You must structure your response into exactly 3 separate sections labeled as follows:
-
-    [1. CONVERSATION]
-    (Write your next natural response as the shopkeeper here. Keep it 1-2 sentences max.)
-
-    [2. PRONUNCIATION & GRAMMAR FEEDBACK]
-    (Analyze the user's text and the Arpabet phonemes.)
-
-    [3. BETTER SUGGESTIONS]
-    (Provide 1-2 alternative, natural, and advanced ways the user could have phrased their answer.)
-
-    --- CHAT HISTORY ---
-    {current_history}
-    User (Customer): {user_speech_text}
-
-    --- YOUR RESPONSE ---
-    """
-
-    # 1. Gọi Gemini API ở chế độ stream
-    response_stream = client.models.generate_content_stream(
-        model="gemini-2.5-flash",
-        contents=prompt_template,
-    )
-
-    full_text = ""
-    # 2. Yield liên tục từng chunk văn bản nhận được từ AI
-    for chunk in response_stream:
-        if chunk.text:
-            full_text += chunk.text
-            yield full_text
-
-    # Sau khi kết thúc luồng, lưu vào lịch sử hội thoại
-    chat_session.add_message("User", user_speech_text)
-    chat_session.add_message("Assistant", full_text)
 
 def process_random_speaking_words(db_manager):
     """
@@ -335,7 +547,7 @@ def handle_record_action(wav2vec2_processor, wav2vec2_model, device, audio_path,
     if not audio_path:
         return gr.update(), None
 
-    audio_path = r"E:\Antigravity\English AI\datasets\mp3\1.wav"  # (đang hard-code để test)
+    # audio_path = r"E:\Antigravity\English AI\datasets\mp3\1.wav"  # (đang hard-code để test)
 
     try:
         if wav2vec2_processor and wav2vec2_model:
@@ -507,6 +719,7 @@ def render_sentence_feedback_md(sentence_obj, comparison_html, accuracy):
 
     return f"""
 <div style="text-align: center; padding: 16px; border: 1px solid #e5e7eb; border-radius: 10px;">
+    <p style="font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #9ca3af; margin: 0 0 8px 0;">Result</p>
     <h2 style="font-size: 20px; margin: 6px 0; color: #111827; line-height: 1.4;">{sentence}</h2>
     <p style="font-size: 13px; color: #4b5563; margin: 2px 0;">{meaning}</p>
     <hr style="margin: 10px 0; border-color: #e5e7eb;">
@@ -518,17 +731,6 @@ def render_sentence_feedback_md(sentence_obj, comparison_html, accuracy):
 
 def handle_sentence_record_action(wav2vec2_processor, wav2vec2_model, device,
                                    audio_path, current_index, sentences_data, sentence_html_text):
-    """
-    Xử lý khi người dùng ghi âm xong 1 câu:
-    - Lấy phoneme người dùng đọc (từ audio_path thật sự ghi âm được)
-    - Dùng CÂU GỐC trong CSDL (đã chuẩn hoá) làm chuẩn để so sánh — không còn
-      tạo lại audio TTS rồi cho model nghe lại để suy ra "câu chuẩn" nữa, vì
-      cách đó khiến câu chuẩn tự dính lỗi nhận diện (vd "got" bị TTS+ASR
-      nghe nhầm thành "god") dù người dùng đọc đúng. Audio mẫu TTS cho người
-      nghe vẫn được giữ nguyên, chỉ là tạo 1 lần khi lấy câu ngẫu nhiên
-      (process_random_speaking_sentences), không tạo lại ở đây.
-    - So khớp 2 chuỗi, tính % và render feedback
-    """
     if not sentences_data:
         return gr.update(), None
 
@@ -536,7 +738,7 @@ def handle_sentence_record_action(wav2vec2_processor, wav2vec2_model, device,
         return gr.update(), None
 
     current_sentence_obj = sentences_data[current_index]
-    audio_path = r"E:\Antigravity\English AI\datasets\mp3\2.wav"
+    # audio_path = r"E:\Antigravity\English AI\datasets\mp3\2.wav"
 
     try:
         if wav2vec2_processor and wav2vec2_model:
@@ -546,9 +748,6 @@ def handle_sentence_record_action(wav2vec2_processor, wav2vec2_model, device,
         else:
             user_phonemes = ""
 
-        # Lấy lại câu gốc từ HTML đang hiển thị (tránh lệch nếu state đổi)
-        # rồi chuẩn hoá về dạng CHỮ HOA, không dấu câu để so cùng "ngôn ngữ"
-        # với output của wav2vec2.
         target_sentence = extract_word(sentence_html_text)
         target_phonemes = normalize_text_for_compare(target_sentence)
 

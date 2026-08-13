@@ -221,6 +221,25 @@ def get_random_words_by_level(cefr_dict: dict, level: str, count: int = 2) -> li
     return random.sample(words, count)
 
 
+def get_random_words_with_examples_by_level(cefr_level: str, count: int = 2) -> list:
+    rows = db.get_all_user_vocabulary()
+    candidates = []
+    for row in rows:
+        # Cấu trúc row theo DatabaseManager: 0: word, 1: cefr_j, ...
+        word, cefr_j = row[0], row[1]
+        if str(cefr_j).strip().upper() != str(cefr_level).strip().upper():
+            continue
+        record = db.get_word(word)
+        if record and record.get("examples"):
+            candidates.append(word)
+
+    if not candidates:
+        return []
+    if len(candidates) <= count:
+        return candidates
+    return random.sample(candidates, count)
+
+
 def generate_sentences_with_gemini(client, words: list) -> list:
     prompt = f"""
     Bạn là một giáo viên tiếng Anh.
@@ -327,11 +346,36 @@ def process_start_practice(client, cefr_dict_sample, cefr_level, translator, lem
             lemmatizer=lemmatizer
         )
     except Exception as e:
-        return (
-            gr.update(visible=True), gr.update(visible=False),
-            [], 0, 0, f"⚠️ Lỗi hệ thống: {str(e)}",
-            "", "", None, "", "", gr.update(interactive=True)
-        )
+        print(f"⚠️ Lỗi gọi API sinh câu ({e}). Fallback sang từ có sẵn trong DB cùng CEFR level {cefr_level}.")
+        fallback_words = get_random_words_with_examples_by_level(cefr_level, count=len(selected_words))
+
+        if not fallback_words:
+            return (
+                gr.update(visible=True), gr.update(visible=False),
+                [], 0, 0,
+                (f"⚠️ Không gọi được dịch vụ tạo câu ví dụ, và hiện chưa có từ nào "
+                 f"cấp độ {cefr_level} sẵn có trong dữ liệu để luyện tạm. Vui lòng thử lại sau!"),
+                "", "", None, "", "", gr.update(interactive=True)
+            )
+
+        try:
+            # Các từ fallback đã được lọc là đã có sẵn example trong DB, nên bước
+            # này sẽ không cần gọi API sinh câu mới cho bất kỳ từ nào trong đó.
+            generated_data = get_or_generate_sentences(
+                client,
+                fallback_words,
+                cefr_level,
+                CEFR_DICT=cefr_dict_sample,
+                translator=translator,
+                lemmatizer=lemmatizer
+            )
+            selected_words = fallback_words
+        except Exception as e2:
+            return (
+                gr.update(visible=True), gr.update(visible=False),
+                [], 0, 0, f"⚠️ Lỗi hệ thống: {str(e2)}",
+                "", "", None, "", "", gr.update(interactive=True)
+            )
 
     os.makedirs("/tmp/audio_cache", exist_ok=True)
     parsed_questions = []
@@ -515,9 +559,9 @@ def transcribe_short_audio_text(whisper, nlp, AUDIO_PATH_FOLDER, mp3_name):
     if cached_transcript:
         raw_text = cached_transcript
     else:
+        gr.Info("Please wait a bit for listening data")
         result = whisper.transcribe(AUDIO_PATH, fp16=False)
         raw_text = result["text"].strip()
-        # Sử dụng db.add_mp3_transcript từ DatabaseManager
         db.add_mp3_transcript(mp3_name, raw_text)
 
     transcript, label_audio = clear_transcript(AUDIO_PATH, raw_text)

@@ -59,15 +59,6 @@ AUDIO_PATH = os.path.join(project_root, "datasets", "short_audios", "being_singl
 AUDIO_PATH_FOLDER = os.path.join(project_root, "datasets", "short_audios")
 nlp = spacy.load("en_core_web_sm")
 # ---------- KHAI BÁO SPEAKING ----------
-storage_database = [
-    "Product: Fresh Milk | Price: $3.00 per carton | Stock: 15 left | Discount: 10% off if you buy 2.",
-    "Product: White Bread | Price: $2.50 per loaf | Stock: 8 left | Discount: No discount.",
-    "Product: Organic Eggs | Price: $4.00 per dozen | Stock: 20 cartons left | Discount: Buy 1 get 1 free today!",
-    "Product: Potato Chips | Price: $1.80 per bag | Stock: 50 left | Discount: 20% off for all snacks.",
-    "Product: Coca-Cola | Price: $1.20 per can | Stock: 100 left | Discount: No discount.",
-    "Payment Methods: We accept Cash, Credit Cards (Visa/Mastercard), and Apple Pay. No American Express.",
-]
-
 MODEL_SIZE = "base"
 device = "cpu"
 model_whisper = whisper.load_model(MODEL_SIZE, device=device)
@@ -89,13 +80,7 @@ if api_key:
 else:
     print("Cảnh báo: chưa thiết lập biến môi trường GEMINI_API_KEY. App sẽ báo lỗi khi gọi AI.")
 
-chat_session = SimpleChatSessionManager()
-initial_greeting = "Hello! Welcome to our store. What would you like to buy today?"
-chat_session.add_message("assistant", initial_greeting)
-
-model_name="all-MiniLM-L6-v2"
-retriever = sm.rag_with_faiss(model_name, storage_database)
-# retriever = ""
+default_practice_session = SimpleChatSessionManager()
 
 # ---------- KHAI BÁO READING ----------
 translator = GoogleTranslator(source="en", target="vi")
@@ -154,8 +139,8 @@ ESSAY_MODEL_NAME = "microsoft/deberta-v3-base"
 ESSAY_SCORE_MIN, ESSAY_SCORE_MAX = 1.0, 5.0
 ESSAY_MAX_LEN = 512
 ESSAY_MODEL_WEIGHTS_PATH = r"E:\Đồ án môn học\Demo Speaking Module\models\best_model.bin"
-# essay_scoring_tokenizer, essay_scoring_model = wm.load_model(ESSAY_MODEL_WEIGHTS_PATH, device, ESSAY_MODEL_NAME, ESSAY_SCORING_COLUMNS)
-essay_scoring_tokenizer, essay_scoring_model = "", ""
+essay_scoring_tokenizer, essay_scoring_model = wm.load_model(ESSAY_MODEL_WEIGHTS_PATH, device, ESSAY_MODEL_NAME, ESSAY_SCORING_COLUMNS)
+# essay_scoring_tokenizer, essay_scoring_model = "", ""
 # ---------- GIAO DIỆN ----------
 with gr.Blocks() as demo:
 
@@ -184,7 +169,7 @@ with gr.Blocks() as demo:
                     gr.Button("➔", variant="primary", scale=1)
 
             # --- TAB 2: VOCABULARY ---
-            with gr.Column(visible=False) as view_vocab:
+            with gr.Column(visible=True) as view_vocab:
                 gr.HTML("<h3>Flashcard Review</h3>")
                 due_list_state = gr.State(value=[])
                 with gr.Row(elem_id="vocab-stats-row"):
@@ -212,23 +197,43 @@ with gr.Blocks() as demo:
                                 btn_show = gr.Button("Check answer", variant="primary",
                                                      elem_classes=["custom-btn-show"])
 
-                            with gr.Column(visible=False) as area_answer:
+                            # Khai báo visible=True để tránh lỗi Gradio không render đúng nội dung
+                            # con (cefr_display) ở lần đầu gr.update(visible=True) (giống lý do đã
+                            # ghi ở rp_detail_panel). demo.load() -> pipeline_load() sẽ set về
+                            # visible=False ngay sau khi trang load nên người dùng không thấy nó.
+                            with gr.Column(visible=True) as area_answer:
                                 cefr_display = gr.HTML(sanitize_html=False)
                                 gr.HTML("<div style='height: 15px;'></div>")
 
-                            with gr.Row(visible=False, elem_classes=["fsrs-buttons-row"]) as fsrs_buttons_row:
+                            # Cùng lý do với area_answer: khai báo visible=True để component con
+                            # (các nút Again/Hard/Good/Easy) mount sẵn từ đầu, tránh bug Gradio
+                            # không render đúng ở lần đầu toggle visible=False -> True.
+                            # demo.load() -> pipeline_load() sẽ set về visible=False ngay sau khi
+                            # trang load nên người dùng không thấy nó lộ ra.
+                            with gr.Row(visible=True, elem_classes=["fsrs-buttons-row"]) as fsrs_buttons_row:
                                 btn_again = gr.Button("Again", elem_classes=["btn-fsrs", "btn-again"], min_width=110)
                                 btn_hard = gr.Button("Hard", elem_classes=["btn-fsrs", "btn-hard"], min_width=110)
                                 btn_good = gr.Button("Good", elem_classes=["btn-fsrs", "btn-good"], min_width=110)
                                 btn_easy = gr.Button("Easy", elem_classes=["btn-fsrs", "btn-easy"], min_width=110)
 
-                            with gr.Column(visible=False) as area_empty:
+                            # Cùng lý do với area_answer / fsrs_buttons_row: khai báo visible=True
+                            # để component con (Markdown + btn_refresh) mount sẵn từ đầu, tránh bug
+                            # Gradio không render đúng ở lần đầu toggle visible=False -> True (đây
+                            # chính là lý do area_empty không hiện ngay sau khi ôn xong từ cuối
+                            # cùng, phải bấm lại vào tab mới thấy). demo.load() -> pipeline_load()
+                            # sẽ set về visible=False ngay khi còn từ để ôn nên không lộ ra sai.
+                            with gr.Column(visible=True) as area_empty:
                                 gr.Markdown("### 🎉 Congratulation! You have done all words today.")
                                 btn_refresh = gr.Button("Check again", variant="secondary")
                 btn_show.click(
-                    fn=vm.show_answer_action,
+                    fn=vm.show_answer_toggle_visibility,
+                    inputs=None,
+                    outputs=[area_question, area_answer, fsrs_buttons_row],
+                    show_progress="hidden"
+                ).then(
+                    fn=vm.show_answer_action_content_only,
                     inputs=[due_list_state],
-                    outputs=[area_question, area_answer, fsrs_buttons_row, cefr_display],
+                    outputs=[cefr_display],
                     show_progress="hidden"
                 )
 
@@ -238,35 +243,39 @@ with gr.Blocks() as demo:
                     area_question, area_answer, area_empty
                 ]
 
+                # Dùng riêng cho các nơi gọi trực tiếp vm.pipeline_load() (hàm này giờ trả
+                # thêm 1 giá trị cho fsrs_buttons_row - luôn ẩn, vì nút chấm điểm chỉ hiện
+                # sau khi bấm "Check answer", không thuộc về bước load/reset session).
+                # Không gộp fsrs_buttons_row vào vocab_outputs gốc vì add_fsrs_btn.click bên
+                # dưới đã tự thêm fsrs_buttons_row riêng vào outputs của nó rồi (dùng
+                # rm.add_new_word_to_db_no_ui_update, không phải vm.pipeline_load).
+                vocab_outputs_full = vocab_outputs + [fsrs_buttons_row]
+
                 for btn, rating_name in [(btn_again, "Again"), (btn_hard, "Hard"), (btn_good, "Good"),
                                          (btn_easy, "Easy")]:
                     btn.click(
                         fn=lambda s, r=rating_name: vm.review_word_action(fsrs_app, r, s),
                         inputs=[due_list_state],
-                        outputs=vocab_outputs,
+                        outputs=vocab_outputs_full,
                         show_progress="hidden"
-                    ).then(
-                        fn=lambda: (gr.update(visible=False), gr.update(visible=False)),
-                        inputs=None,
-                        outputs=[fsrs_buttons_row, area_answer]
                     )
 
                 btn_refresh.click(
-                    fn=lambda: vm.pipeline_load(),
+                    fn=vm.refresh_review_session,
                     inputs=None,
-                    outputs=vocab_outputs,
+                    outputs=vocab_outputs_full,
                     show_progress="hidden"
                 )
 
                 demo.load(
                     fn=lambda: vm.pipeline_load(),
                     inputs=None,
-                    outputs=vocab_outputs,
+                    outputs=vocab_outputs_full,
                     show_progress="hidden"
                 )
 
             # --- TAB 3: LISTENING ---
-            with gr.Column(visible=False) as view_listen:
+            with gr.Column(visible=True) as view_listen:
                 transcript_state = gr.State("")
                 questions_state = gr.State([])
                 current_index_state = gr.State(0)
@@ -386,11 +395,14 @@ with gr.Blocks() as demo:
                                         visible=False
                                     )
                                 )
-                        with gr.Row(visible=False) as check_btn_panel:
-                            score_listen_paragraph = gr.Markdown("")
-                            prev_listen_paragraph_btn = gr.Button("⬅ Previous")
-                            check_listen_paragraph_btn = gr.Button("Check", elem_id="custom_green_btn")
-                            next_listen_paragraph_btn = gr.Button("Next ➡")
+                        with gr.Column(visible=False) as check_btn_panel:
+                            with gr.Row():
+                                score_listen_paragraph = gr.Markdown("")
+                            with gr.Row():
+                                prev_listen_paragraph_btn = gr.Button("⬅ Previous")
+                                check_listen_paragraph_btn = gr.Button("Check", elem_id="custom_green_btn")
+                                next_listen_paragraph_btn = gr.Button("Next ➡")
+
 
                     tab_listen.select(
                         fn=lambda : lm.load_value_ratio_audio(AUDIO_PATH_FOLDER),
@@ -525,7 +537,7 @@ with gr.Blocks() as demo:
                         )
 
             # --- TAB 4: SPEAKING ---
-            with gr.Column(visible=False) as view_speak:
+            with gr.Column(visible=True) as view_speak:
                 speaking_words_state = gr.State([])
                 speaking_current_idx_state = gr.State(0)
 
@@ -586,9 +598,6 @@ with gr.Blocks() as demo:
                             outputs=[audio_player]
                         )
 
-
-                        # 2. Xử lý khi thay đổi dữ liệu audio (sau khi ghi âm hoàn tất)
-                        # Chỉ để log/trích xuất phoneme, không ảnh hưởng tới nút Next/Previous.
                         audio_recorder.change(
                             fn=lambda x, y, r, s: sm.handle_record_action(wav2vec2_processor, wav2vec2_model, device, x, y, r, s),
                             inputs=[
@@ -690,8 +699,6 @@ with gr.Blocks() as demo:
                             outputs=[sentence_feedback_md, sentence_audio_recorder]
                         )
 
-                        # 3. Tự động load 1 câu ngẫu nhiên ngay khi người dùng bấm vào tab
-                        #    (thay cho câu placeholder "Something Inside But I Don't Know")
                         sentence_tab.select(
                             fn=lambda: sm.process_random_speaking_sentences(db),
                             inputs=[],
@@ -799,66 +806,159 @@ with gr.Blocks() as demo:
                         )
 
                     with gr.Tab("Practice"):
-                        with gr.Row():
-                            with gr.Column(scale=3):
-                                gr.HTML("🎙️ <b>Grocery Store</b>")
-                                conversation_history = gr.Chatbot(
-                                    label="Chat History",
-                                    elem_id="chat-bot",
-                                    height=450,
-                                    value=[{"role": "assistant", "content": initial_greeting}]
+                        with gr.Column(elem_id="practice-tab-wrap"):
+                            gr.HTML(f"<style>{sm.PRACTICE_CSS}</style>")
+
+                            # State xuyên suốt phiên luyện nói
+                            practice_topic_state = gr.State("")       # id topic đang chọn ("custom" nếu tự nhập)
+                            practice_topic_title_state = gr.State("") # tên topic thật sự dùng để hỏi AI
+                            practice_session_state = gr.State(default_practice_session)
+
+                            # ---------------- MÀN HÌNH 1: CHỌN CHỦ ĐỀ ----------------
+                            with gr.Column(visible=True) as practice_setup_panel:
+                                gr.Markdown("### Chọn chủ đề, luyện nói với AI", elem_classes="sp-title")
+                                gr.Markdown(
+                                    "AI sẽ mở đầu câu chuyện và trò chuyện tự nhiên cùng bạn bằng tiếng Anh.",
                                 )
+
+                                topic_buttons = []
+                                with gr.Row(elem_classes="sp-topic-grid"):
+                                    for t in sm.TOPICS:
+                                        btn = gr.Button(
+                                            f"{t['title']}\n{t['sub']}",
+                                            elem_classes="sp-topic-card",
+                                        )
+                                        topic_buttons.append(btn)
+
+                                custom_topic_tb = gr.Textbox(
+                                    placeholder="Hoặc tự nhập chủ đề riêng của bạn...",
+                                    show_label=False,
+                                )
+
+                                level_radio = gr.Radio(
+                                    choices=[(l["label"], l["id"]) for l in sm.LEVELS],
+                                    value="intermediate",
+                                    label="Trình độ",
+                                    elem_id="sp-level-radio",
+                                )
+
+                                practice_setup_error = gr.Markdown("")
+                                start_practice_btn = gr.Button(
+                                    "Bắt đầu luyện nói", elem_id="sp-start-btn"
+                                )
+
+                            # ---------------- MÀN HÌNH 2: HỘI THOẠI ----------------
+                            with gr.Column(visible=False) as practice_conversation_panel:
+                                with gr.Row():
+                                    practice_topic_title_md = gr.Markdown("", elem_classes="sp-title")
+                                    practice_feedback_toggle = gr.Checkbox(
+                                        value=True, label="Sửa lỗi", scale=0
+                                    )
+                                    end_practice_btn = gr.Button(
+                                        "Kết thúc", scale=0, elem_id="sp-end-btn"
+                                    )
+
+                                practice_orb_html = gr.HTML(sm.render_orb_html("idle"))
+
+                                practice_chatbot = gr.Chatbot(
+                                    label=None,
+                                    show_label=False,
+                                    elem_id="practice-chatbot",
+                                    height=340,
+                                )
+                                practice_correction_html = gr.HTML("", visible=True)
+
                                 with gr.Row(elem_classes="audio-row"):
-                                    # Nút cảnh báo thiết lập scale=0, sử dụng class tip-btn để CSS ép size cứng 100px
-                                    gr.Button("❗", scale=0, min_width=100, elem_classes="tip-btn")
-                                    # Component Audio chiếm không gian co giãn tự do
-                                    audio_input = gr.Audio(
-                                        label="HOLD TO SPEAK",
+                                    practice_audio_input = gr.Audio(
+                                        label="Giữ để nói",
                                         sources=["microphone"],
                                         type="filepath",
-                                        container=False,
-                                        scale=2,
-                                        elem_id="hide-dropdown-audio",
-                                        waveform_options=gr.WaveformOptions(show_recording_waveform=False)
+                                        elem_id="sp-mic-audio",
+                                        waveform_options=gr.WaveformOptions(show_recording_waveform=False),
                                     )
-                                    # Cột trống scale=1 để dành khoảng trống cho Audio co giãn khi click
-                                    gr.Markdown("", scale=1)
-
-                            with gr.Column(scale=2):
-                                gr.Markdown("#### Detailed Feedback")
-                                with gr.Column(elem_classes="feedback-box"):
-                                    gr.HTML("🟢 <b>Pronunciation</b>")
-                                    feedback_output = gr.Markdown(
-                                        value="*Chưa có dữ liệu hội thoại. Hãy nói điều gì đó!*"
+                                    practice_audio_out = gr.Audio(
+                                        autoplay=True, visible=True, elem_id="sp-ai-audio"
                                     )
 
-                                with gr.Column(elem_classes="feedback-box"):
-                                    suggestions_output = gr.Markdown(
-                                        value="*Các gợi ý nâng cao sẽ hiển thị tại đây.*"
-                                    )
-
-                        # Gọi hàm wrapper thay vì lambda
-                        voice_stream_handler = partial(
-                            sm.handle_voice_stream,
-                            client=client,
-                            model_whisper=model_whisper,
-                            wav2vec2_processor=wav2vec2_processor,
-                            wav2vec2_model=wav2vec2_model,
-                            device=device,
-                            retriever=retriever,
-                            chat_session=chat_session
+                        # --- Chọn chủ đề: bấm 1 trong 6 card hoặc tự gõ ---
+                        topic_click_outputs = [practice_topic_state] + topic_buttons
+                        for t, btn in zip(sm.TOPICS, topic_buttons):
+                            btn.click(
+                                fn=partial(sm.select_topic, t["id"]),
+                                outputs=topic_click_outputs,
+                            )
+                        custom_topic_tb.change(
+                            fn=sm.select_custom_topic,
+                            outputs=topic_click_outputs,
                         )
 
-                        # Gắn handler đã partial vào event Gradio
-                        audio_input.stop_recording(
-                            fn=voice_stream_handler,
-                            inputs=[audio_input, conversation_history],
-                            outputs=[conversation_history, feedback_output, suggestions_output, audio_input]
+                        # --- Bắt đầu luyện nói: tạo phiên mới, AI mở lời ---
+                        start_practice_handler = partial(sm.start_practice_topic, client=client)
+                        start_practice_btn.click(
+                            fn=start_practice_handler,
+                            inputs=[practice_topic_state, custom_topic_tb, level_radio, practice_session_state],
+                            outputs=[
+                                practice_setup_panel,
+                                practice_conversation_panel,
+                                practice_chatbot,
+                                practice_topic_title_state,
+                                practice_topic_title_md,
+                                practice_audio_out,
+                                practice_orb_html,
+                                practice_session_state,
+                                practice_setup_error,
+                            ],
+                        )
+
+                        # --- Mỗi lượt nói của người dùng ---
+                        practice_voice_handler = partial(
+                            sm.process_practice_voice_stream,
+                            client=client,
+                            model_whisper=model_whisper,
+                        )
+                        practice_audio_input.stop_recording(
+                            fn=practice_voice_handler,
+                            inputs=[
+                                practice_audio_input,
+                                practice_chatbot,
+                                practice_session_state,
+                                practice_topic_title_state,
+                                level_radio,
+                            ],
+                            outputs=[
+                                practice_chatbot,
+                                practice_correction_html,
+                                practice_audio_out,
+                                practice_orb_html,
+                                practice_session_state,
+                                practice_audio_input,
+                            ],
+                        )
+
+                        # --- Bật/tắt hiển thị ô sửa lỗi ---
+                        practice_feedback_toggle.change(
+                            fn=lambda show: gr.update(visible=show),
+                            inputs=[practice_feedback_toggle],
+                            outputs=[practice_correction_html],
+                        )
+
+                        # --- Kết thúc phiên: quay lại màn hình chọn chủ đề ---
+                        end_practice_btn.click(
+                            fn=sm.end_practice_session,
+                            outputs=[
+                                practice_setup_panel,
+                                practice_conversation_panel,
+                                practice_chatbot,
+                                practice_topic_title_state,
+                                practice_topic_title_md,
+                                practice_audio_out,
+                                practice_orb_html,
+                            ],
                         )
 
             # --- TAB 5: READING ---
             cached_reading_text = gr.State(value="")
-            with gr.Column(visible=False) as view_read:
+            with gr.Column(visible=True) as view_read:
                 with gr.Tabs():
                     with gr.Tab("Practice") as rp_tab:
                         rp_questions_state = gr.State([])
@@ -881,7 +981,7 @@ with gr.Blocks() as demo:
                         with gr.Column(visible=True) as rp_detail_panel:
                             rp_back_btn = gr.Button("🔀 Quay lại danh sách", variant="secondary", scale=0)
                             rp_title_md = gr.Markdown()
-                            rp_passage_md = gr.Markdown(elem_id="reading-zone-active")
+                            rp_passage_md = gr.Markdown(elem_id="rp-reading-zone")  # FIX: đổi id, tránh trùng với "reading-zone-active" ở tab My Reading
 
                             gr.Markdown("---")
                             gr.Markdown("### ❓ Câu hỏi")
@@ -994,7 +1094,7 @@ with gr.Blocks() as demo:
                         )
 
 
-                    with gr.Tab("Personal"):
+                    with gr.Tab("My Reading"):
                         with gr.Row():
                             with gr.Column(scale=3):
                                 with gr.Accordion("🛠️ Tùy chỉnh giao diện đọc", open=False):
@@ -1097,7 +1197,7 @@ with gr.Blocks() as demo:
                             )
 
             # --- TAB 6: WRITING ---
-            with gr.Column(visible=False) as view_write:
+            with gr.Column(visible=True) as view_write:
                 with gr.Tabs():
                     with gr.Tab("Writting") as writting_subtab:
                         # --- State & Timer dùng riêng cho tab Writting ---
@@ -1266,10 +1366,6 @@ with gr.Blocks() as demo:
                             outputs=[writing_prompt_radio, writing_candidate_prompt_state],
                         )
 
-                        # --- Người dùng bấm chọn 1 đề tài cụ thể trong danh sách ---
-                        # Lấy thẳng theo id từ DB (không dựa vào state trung gian) để tránh
-                        # xung đột với sự kiện change() tự kích hoạt khi on_task_type_change
-                        # set value cho writing_prompt_radio bằng code.
                         writing_prompt_radio.change(
                             fn=lambda selected_id: wm.on_prompt_select(db, selected_id),
                             inputs=[writing_prompt_radio],
@@ -1354,7 +1450,7 @@ with gr.Blocks() as demo:
                             inputs=[writing_last_result_state],
                             outputs=[],
                         )
-                    with gr.Tab("Personal"):
+                    with gr.Tab("My Writting"):
                         with gr.Row(elem_id="writing-tab-row", equal_height=False):
                             with gr.Column(scale=1):
                                 essay_topic = gr.Textbox(
@@ -1415,7 +1511,8 @@ with gr.Blocks() as demo:
                         result_output = gr.Markdown()
 
                         submit_btn.click(
-                            fn=lambda content: wm.handle_essay_scoring(
+                            fn=lambda topic, content: wm.handle_essay_scoring(
+                                topic,
                                 content,
                                 essay_scoring_tokenizer,
                                 essay_scoring_model,
@@ -1461,14 +1558,30 @@ with gr.Blocks() as demo:
     nav_vocab.click(lambda: switch_tab("Vocabulary"), outputs=nav_tab_outputs).then(
         fn=lambda: vm.pipeline_load(),
         inputs=None,
-        outputs=vocab_outputs,
+        outputs=vocab_outputs_full,
         show_progress="hidden"
     )
 
     nav_listen.click(lambda: switch_tab("Listening"), outputs=nav_tab_outputs)
     nav_speak.click(lambda: switch_tab("Speaking"), outputs=nav_tab_outputs)
-    nav_read.click(lambda: switch_tab("Reading"), outputs=nav_tab_outputs)
+    nav_read.click(lambda: switch_tab("Reading"), outputs=nav_tab_outputs).then(
+        fn=lambda: _load_reading_tab(db),
+        inputs=None,
+        outputs=[rp_list_df, rp_list_state, rp_list_panel, rp_detail_panel, rp_result_panel],
+        show_progress="hidden"
+    )
     nav_write.click(lambda: switch_tab("Writing"), outputs=nav_tab_outputs)
+
+    # "Mồi" toàn bộ tab bằng cách khai báo visible=True cho tất cả rồi tắt lại ngay
+    # khi trang vừa load, để component con trong các tab được mount đúng ngay từ
+    # đầu (tránh bug Gradio: phải bấm 2 lần mới hiện nội dung, giống lý do đã ghi
+    # ở area_answer / fsrs_buttons_row / area_empty phía trên).
+    demo.load(
+        fn=lambda: switch_tab("AI Assistant"),
+        inputs=None,
+        outputs=nav_tab_outputs,
+        show_progress="hidden"
+    )
 
 # ---------- ĐỌC CUSTOM CSS & JS ----------
 current_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in locals() else os.getcwd()
